@@ -23,6 +23,11 @@ sqltui provides a terminal UI to interact with your sql or nosql databases. The 
 # install
 ### 1. install with go
 
+```she
+go install github.com/LinPr/sqltui@latest
+```
+
+
 
 # quick start
 
