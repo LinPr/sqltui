@@ -1,4 +1,4 @@
-package mysql
+package redis
 
 import (
 	"github.com/LinPr/sqltui/pkg/tuiapp"
@@ -7,11 +7,12 @@ import (
 )
 
 func RenderDashBoardPage() *tview.Flex {
-	treeView := RenderTreeView()
+
+	treeView := RenderKeyTreeView()
 	queryWidget := RenderQueryWidget()
-	table := RenderTable()
-	tuiapp.MysqlTui.AddWidget(treeView)
-	tuiapp.MysqlTui.AddWidget(table)
+	resultTextView := RenderResultTextView()
+	tuiapp.RedisTui.AddWidget(treeView)
+	tuiapp.RedisTui.AddWidget(resultTextView)
 	// tview.NewTextArea()
 	// tview.NewTextView()
 
@@ -21,20 +22,19 @@ func RenderDashBoardPage() *tview.Flex {
 			// AddItem(inputField, 0, 1, false).
 			AddItem(queryWidget, 0, 1, false).
 			// AddItem(tview.NewBox().SetBorder(true).SetTitle("Middle (3 x height of Top)"), 0, 3, false).
-			AddItem(table, 0, 3, false), 0, 2, false)
+			AddItem(resultTextView, 0, 3, false), 0, 2, false)
 
 	flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyTab:
 			// wiget := tuiapp.TuiApp.MysqlApp.GetFocus()
 			// tuiapp.TuiApp.MysqlApp.SetFocus(tuiapp.NextWigets(wiget))
-			tuiapp.MysqlTui.SetNextFocus()
+			tuiapp.RedisTui.SetNextFocus()
 		}
 		return event // this event should be returned and not to return nil
 	})
 
-	// flex.SetBackgroundColor(tcell.ColorBlack)
-	tuiapp.MysqlTui.AddPage("mysql_dashboard", flex)
-
+	// flex.SetBackgroundColor(tcell.ColorDefault)
+	tuiapp.RedisTui.AddPage("redis_dashboard", flex)
 	return flex
 }

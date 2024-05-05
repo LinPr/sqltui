@@ -5,25 +5,34 @@
 sqltui provides a terminal UI to interact with your sql or nosql databases. The aim of this project is to make it easier to navigate, observe and manage your databases in the wild. 
 
 # Screenshots
-1. login
+1. mysql login
 ![](./images/1.png)
 
-2. tables tree
+2. mysql tables tree
 ![](./images/2.png)
 
-3. show records
+3. mysql show records
 ![](./images/3.png)
 
-4. auto complete query
+4. mysql auto complete query
 ![](./images/4.png)
 
-5. show error message
+5. msql show error message
 ![](./images/5.png)
+
+6. redis keys 
+![](./images/6.png)
+
+7. redis result
+![](./images/7.png)
+
+8. redis auto complete and command tip
+![](./images/8.png)
 
 # install
 ### 1. install with go
 
-```she
+```shell
 go install github.com/LinPr/sqltui@latest
 ```
 

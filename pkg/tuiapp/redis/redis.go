@@ -1,7 +1,15 @@
 package redis
 
-import "log"
+import (
+	"github.com/LinPr/sqltui/pkg/tuiapp"
+	// "github.com/rivo/tview"
+)
 
-func NewRedisTui() {
-	log.Println("redis tui")
+func Init() {
+	tuiapp.RedisTui.AddPage("redis_login", RenderLoginPage())
+	tuiapp.RedisTui.AddPage("redis_dashboard", RenderDashBoardPage())
+
+	// first enter into login page
+	tuiapp.RedisTui.ShowPage("redis_login")
+	// tuiapp.ShowPage("mysql_dashboard")
 }

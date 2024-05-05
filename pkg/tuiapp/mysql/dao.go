@@ -98,7 +98,7 @@ func (db *DB) ShowDatabases() ([]string, error) {
 		}
 		databases = append(databases, database)
 	}
-	log.Printf("databases: %+v", databases)
+
 	return databases, nil
 }
 
@@ -121,7 +121,6 @@ func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
 		}
 		tables = append(tables, table)
 	}
-	log.Printf("tables: %+v", tables)
 	return tables, nil
 }
 
@@ -171,7 +170,6 @@ func readRecords(rows *sql.Rows) ([][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Println("----columns: ", columns)
 	var records [][]string
 	for rows.Next() {
 		record := make([]any, len(columns), len(columns))

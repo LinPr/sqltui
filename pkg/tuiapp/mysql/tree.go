@@ -1,8 +1,6 @@
 package mysql
 
 import (
-	"log"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -53,8 +51,6 @@ func loadTables(dbClinet *DB, targetNode *tview.TreeNode) {
 			SetSelectable(true)
 
 		node.SetSelectedFunc(func() {
-			log.Println("fetch database records !!!!")
-			log.Println(node.GetText())
 			// execute sql and show results in table
 			query := "select * from " + node.GetText()
 			fields, result, err := DbClinet.ExecuteRawQuery(query)

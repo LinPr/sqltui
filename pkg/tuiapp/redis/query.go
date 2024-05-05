@@ -1,4 +1,4 @@
-package mysql
+package redis
 
 import (
 	"github.com/LinPr/sqltui/pkg/tuiapp"
@@ -6,10 +6,11 @@ import (
 )
 
 func RenderQueryWidget() *tview.Flex {
-	inputField := RenderInputFiedl()
-	textView := RenderTextView()
 
-	tuiapp.MysqlTui.AddWidget(inputField)
+	inputField := RenderInputFiedl()
+	textView := RenderErrTextView()
+
+	tuiapp.RedisTui.AddWidget(inputField)
 
 	queryWidget := tview.NewFlex().
 		SetDirection(tview.FlexRow).
