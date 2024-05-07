@@ -99,9 +99,8 @@ $ sqltui redis
 
 
 # TODO list
-1. suport redis(currently working on)
-2. supprt sqlight
-3. others...
+1. supprt sqlight(current working on)
+2. support others...
 
 # references
 
