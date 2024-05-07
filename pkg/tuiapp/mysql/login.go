@@ -1,19 +1,16 @@
-package redis
+package mysql
 
 import (
 	"fmt"
 	"log"
-	"strconv"
-	"time"
 
+	"github.com/LinPr/sqltui/pkg/config"
 	"github.com/LinPr/sqltui/pkg/tuiapp"
 	"github.com/gdamore/tcell/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/rivo/tview"
 )
 
 func RenderLoginPage() *tview.Flex {
-
 	form := renderLoginForm()
 	textView := renderLoginErrTextView()
 
@@ -25,29 +22,24 @@ func RenderLoginPage() *tview.Flex {
 			AddItem(textView, 0, 1, false), 50, 3, true).
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false)
 
-	flex.SetBorder(true)
-
-	tuiapp.RedisTui.AddPage("redis_login", form)
+	// tuiapp.MysqlTui.AddPage("mysql_login", form)
 
 	return flex
 }
 
-var LoginErrOut *tview.TextView
-
-func printfLoginErrOut(format string, a ...any) {
-	LoginErrOut.Clear()
-	erMsg := fmt.Sprintf(format, a...)
-	LoginErrOut.SetText(erMsg)
-}
-
 func renderLoginForm() *tview.Form {
+	mysqlConf, err := config.ReadMySqlConfig()
+	if err != nil {
+		log.Println("ReadMySqlConfig error: ", err)
+		return nil
+	}
+
 	form := tview.NewForm().
-		AddInputField("username:", "", 20, nil, nil).
-		AddInputField("password:", "", 20, nil, nil).
-		AddInputField("    host:", "127.0.0.1", 20, nil, nil).
-		AddInputField("    port:", "6379", 20, nil, nil).
-		// AddInputField("  dbname:", "ngx_test", 20, nil, nil).
-		AddInputField("  rdbNum:", "0", 20, nil, nil).
+		AddInputField("username:", mysqlConf.UserName, 20, nil, nil).
+		AddInputField("password:", mysqlConf.Password, 20, nil, nil).
+		AddInputField("    host:", mysqlConf.Host, 20, nil, nil).
+		AddInputField("    port:", mysqlConf.Port, 20, nil, nil).
+		AddInputField("  dbname:", mysqlConf.DbName, 20, nil, nil).
 		SetFieldBackgroundColor(tcell.ColorGray)
 	// AddDropDown(" charset:", []string{"utf8", "ascall", "unicode"}, 0, nil)
 
@@ -61,7 +53,6 @@ func renderLoginForm() *tview.Form {
 	form.SetBorder(true).SetBorderColor(tcell.ColorWhite)
 
 	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		log.Println("event: ", event.Key())
 		switch event.Key() {
 		case tcell.KeyCtrlS:
 			SaveCallback(form)()
@@ -74,6 +65,14 @@ func renderLoginForm() *tview.Form {
 	})
 
 	return form
+}
+
+var LoginErrOut *tview.TextView
+
+func printfLoginErrOut(format string, a ...any) {
+	LoginErrOut.Clear()
+	erMsg := fmt.Sprintf(format, a...)
+	LoginErrOut.SetText(erMsg)
 }
 
 func renderLoginErrTextView() *tview.TextView {
@@ -96,51 +95,45 @@ func ConnectCallback(form *tview.Form) func() {
 		password := form.GetFormItem(1).(*tview.InputField).GetText()
 		host := form.GetFormItem(2).(*tview.InputField).GetText()
 		port := form.GetFormItem(3).(*tview.InputField).GetText()
-		rdbNumStr := form.GetFormItem(4).(*tview.InputField).GetText()
-		rdbNum, err := strconv.Atoi(rdbNumStr)
+		dbname := form.GetFormItem(4).(*tview.InputField).GetText()
+
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8", username, password, host, port, dbname)
+		log.Println(dsn)
+
+		dbc, err := NewDB(dsn) // mmust init database client here
 		if err != nil {
 			printfLoginErrOut("[red]" + err.Error())
 			return
 		}
 
-		rdsc, err := NewRDS(&redis.Options{
-			Addr:         fmt.Sprintf("%s:%s", host, port),
-			Username:     username,
-			Password:     password,
-			DB:           rdbNum,
-			WriteTimeout: 3 * time.Second,
-			ReadTimeout:  2 * time.Second,
-		}) // mmust init database client here
-		if err != nil {
-			printfLoginErrOut("[red]" + err.Error())
-			return
-		}
-		_ = rdsc
-		// fields, err := dbc.FetchTableFields("urls")
-		// if err != nil {
-		// 	log.Println("FetchTableFields error: ", err)
-		// }
-		// log.Printf("fields: %+v", fields)
-		// recods, err := dbc.FetchTableRecords("urls")
-		// if err != nil {
-		// 	log.Println("FetchTableRecords error: ", err)
-		// }
-		// log.Printf("recods: %+v", recods)
+		_ = dbc
 
-		// SetRootTreeNodeName(GetDbName())
-		tuiapp.RedisTui.ShowPage("redis_dashboard")
+		// save current config
+		SaveCallback(form)()
+
+		SetRootTreeNodeName(GetDbName())
+		tuiapp.MysqlTui.ShowPage("mysql_dashboard")
 	}
 }
 
 func SaveCallback(form *tview.Form) func() {
 	return func() {
-		log.Println("call SaveCallback")
+		mysqlConfig := &config.MysqlConfig{
+			UserName: form.GetFormItem(0).(*tview.InputField).GetText(),
+			Password: form.GetFormItem(1).(*tview.InputField).GetText(),
+			Host:     form.GetFormItem(2).(*tview.InputField).GetText(),
+			Port:     form.GetFormItem(3).(*tview.InputField).GetText(),
+			DbName:   form.GetFormItem(4).(*tview.InputField).GetText(),
+		}
+		if err := config.WriteMysqlConfig(mysqlConfig); err != nil {
+			log.Println("WriteMysqlConfig error: ", err)
+		}
 	}
 }
 
 func QuitCallback() func() {
 	return func() {
 		// app.Stop()
-		tuiapp.RedisTui.App.Stop()
+		tuiapp.MysqlTui.App.Stop()
 	}
 }
