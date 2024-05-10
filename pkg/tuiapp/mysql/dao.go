@@ -8,6 +8,14 @@ import (
 	"strings"
 )
 
+const (
+	// DQL
+	SELECT = "select"
+	SHOW   = "show"
+
+	// DDL & DML & DCL & TCL ....
+)
+
 var (
 	DbClinet *DB
 )
@@ -48,7 +56,32 @@ func GetDbName() string {
 	return dbName
 }
 
-func (db *DB) ExecuteRawQuery(query string) (fields []string, records [][]string, err error) {
+type RawCommandResult struct {
+	Fields  []string
+	Records [][]string
+	Result  sql.Result
+	IsDQL   bool
+}
+
+func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err error) {
+	cmd := strings.Split(strings.Trim(query, " "), " ")
+	if len(cmd) == 0 {
+		return rawCmdResult, fmt.Errorf("empty query")
+	}
+
+	switch strings.ToLower(cmd[0]) {
+	case SELECT, SHOW:
+		rawCmdResult.IsDQL = true
+		rawCmdResult.Fields, rawCmdResult.Records, err = db.RawQuery(query)
+		return rawCmdResult, err
+	default:
+		rawCmdResult.IsDQL = false
+		rawCmdResult.Result, err = db.RawExec(query)
+		return rawCmdResult, err
+	}
+}
+
+func (db *DB) RawQuery(query string) (fields []string, records [][]string, err error) {
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, nil, err
@@ -59,7 +92,7 @@ func (db *DB) ExecuteRawQuery(query string) (fields []string, records [][]string
 		return nil, nil, err
 	}
 
-	query = strings.TrimSuffix(query, ";")
+	query = strings.ToLower(strings.TrimSuffix(query, ";"))
 	words := strings.Split(query, " ")
 	var tableName string
 	for i, word := range words {
@@ -80,6 +113,14 @@ func (db *DB) ExecuteRawQuery(query string) (fields []string, records [][]string
 	}
 
 	return fields, records, nil
+}
+
+func (db *DB) RawExec(query string) (sql.Result, error) {
+	res, err := db.Exec(query)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 func (db *DB) ShowDatabases() ([]string, error) {

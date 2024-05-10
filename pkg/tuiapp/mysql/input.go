@@ -26,15 +26,34 @@ func RenderInputFiedl() *tview.InputField {
 		switch key {
 		case tcell.KeyEnter:
 			// execute sql and show results in table
-			fields, result, err := DbClinet.ExecuteRawQuery(inputField.GetText())
+			query := inputField.GetText()
+			rawCmdResult, err := DbClinet.RawSqlCommand(query)
 			if err != nil {
 				PrintfTextView("[red]Error: %s", err)
 				ClearTableRecords()
 				return
 			}
-			FillTableWithQueryResult(fields, result)
-			PrintfTextView("[yellow]Status: Success !")
-			addCommandHistory(inputField.GetText())
+			if rawCmdResult.IsDQL {
+				FillTableWithQueryResult(rawCmdResult.Fields, rawCmdResult.Records)
+				PrintfTextView("[yellow]Status: Success !")
+				addCommandHistory(query)
+			} else {
+				rowAffected, err := rawCmdResult.Result.RowsAffected()
+				if err != nil {
+					PrintfTextView("[red]Error: %s", err)
+					ClearTableRecords()
+					return
+				}
+				lastInsertId, err := rawCmdResult.Result.LastInsertId()
+				if err != nil {
+					PrintfTextView("[red]Error: %s", err)
+					ClearTableRecords()
+					return
+
+				}
+				PrintfTextView("[yellow]Status: Success ! \n\t Rows affected: %d, Last Insert ID: %d", rowAffected, lastInsertId)
+				addCommandHistory(query)
+			}
 
 		case tcell.KeyEscape:
 			log.Println("KeyEscape pressed")

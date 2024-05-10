@@ -53,15 +53,34 @@ func loadTables(dbClinet *DB, targetNode *tview.TreeNode) {
 		node.SetSelectedFunc(func() {
 			// execute sql and show results in table
 			query := "select * from " + node.GetText()
-			fields, result, err := DbClinet.ExecuteRawQuery(query)
+			rawCmdResult, err := DbClinet.RawSqlCommand(query)
 			if err != nil {
 				PrintfTextView("[red]Error: %s", err)
 				ClearTableRecords()
 				return
 			}
-			FillTableWithQueryResult(fields, result)
-			PrintfTextView("[yellow]Status: Success !")
-			addCommandHistory(query)
+			if rawCmdResult.IsDQL {
+				FillTableWithQueryResult(rawCmdResult.Fields, rawCmdResult.Records)
+				PrintfTextView("[yellow]Status: Success !")
+				addCommandHistory(query)
+			} else {
+				rowAffected, err := rawCmdResult.Result.RowsAffected()
+				if err != nil {
+					PrintfTextView("[red]Error: %s", err)
+					ClearTableRecords()
+					return
+				}
+				lastInsertId, err := rawCmdResult.Result.LastInsertId()
+				if err != nil {
+					PrintfTextView("[red]Error: %s", err)
+					ClearTableRecords()
+					return
+
+				}
+				PrintfTextView("[yellow]Status: Success ! \n\t Rows affected: %d, Last Insert ID: %d", rowAffected, lastInsertId)
+				addCommandHistory(query)
+			}
+
 		})
 		targetNode.AddChild(node)
 	}
