@@ -3,7 +3,6 @@ package redis
 import (
 	"context"
 	"encoding/json"
-	"log"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -46,7 +45,6 @@ func (rds *RDS) ExecuteRawQuery(args []string) (string, error) {
 
 	cmd := rds.rdsc.Do(context.Background(), tmpArgs...)
 	result, err := cmd.Result()
-	log.Println("")
 	if err != nil {
 		return "", err
 	}
@@ -68,7 +66,6 @@ func (rds *RDS) Scan(cursor uint64, match string, count int64, keyType string) (
 
 func (rds *RDS) GetValue(key string) (string, error) {
 	keyType := rds.rdsc.Type(context.Background(), key).Val()
-	log.Printf("keyType: %s", keyType)
 	switch keyType {
 	case "string":
 		val, err := rds.rdsc.Get(context.Background(), key).Result()
@@ -103,7 +100,6 @@ func (rds *RDS) GetValue(key string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		log.Printf("zset: %+v", val)
 		return FormatJson(val)
 
 	case "bitmap":
@@ -113,8 +109,11 @@ func (rds *RDS) GetValue(key string) (string, error) {
 		}
 		return FormatJson(val)
 
+	case "none":
+		return "(key does not exist)", nil
+
 	default:
-		return "sqltui has not implimented type" + keyType, nil
+		return "sqltui has not implemented type: " + keyType, nil
 	}
 }
 

@@ -7,13 +7,22 @@ import (
 
 var RootTreeNode *tview.TreeNode
 
+// SetRootTreeNodeName is called after a successful login. It renames the
+// root node and (re)loads the database list underneath it.
 func SetRootTreeNodeName(dbName string) {
+	if dbName == "" {
+		dbName = "mysql"
+	}
 	RootTreeNode.SetText(dbName)
+	RootTreeNode.ClearChildren()
+	loadDatabases(GetDB(), RootTreeNode)
+	RootTreeNode.SetReference("root")
+	RootTreeNode.SetExpanded(true)
 }
 
 func RenderTreeView() *tview.TreeView {
 
-	RootTreeNode = tview.NewTreeNode("show_tables").
+	RootTreeNode = tview.NewTreeNode("mysql").
 		SetColor(tcell.ColorOlive)
 
 	tree := tview.NewTreeView().
@@ -25,63 +34,85 @@ func RenderTreeView() *tview.TreeView {
 	tree.SetSelectedFunc(func(node *tview.TreeNode) {
 		reference := node.GetReference()
 		if reference == nil {
-			// Selecting the root node d
-			loadTables(GetDB(), node)
-			node.SetReference("database")
+			// Selecting the root node before it has been populated
+			loadDatabases(GetDB(), node)
+			node.SetReference("root")
 			return
 		}
 
 		if len(node.GetChildren()) > 0 {
 			node.SetExpanded(!node.IsExpanded())
 		}
-
 	})
 	return tree
 }
 
-func loadTables(dbClinet *DB, targetNode *tview.TreeNode) {
-	tables, err := dbClinet.ShowCurrentDatabaseTables()
+// loadDatabases fills targetNode with one child node per database.
+// Selecting a database node lazily loads its tables.
+func loadDatabases(dbClinet *DB, targetNode *tview.TreeNode) {
+	if dbClinet == nil {
+		PrintfTextView("[red]Error: not connected to a mysql server yet")
+		return
+	}
+	databases, err := dbClinet.ShowDatabases()
 	if err != nil {
-		panic(err)
+		PrintfTextView("[red]Error: %s", err)
+		return
+	}
+	for _, database := range databases {
+		dbNode := tview.NewTreeNode(database).
+			SetReference(database).
+			SetColor(tcell.ColorGreen).
+			SetSelectable(true)
+
+		dbNode.SetSelectedFunc(func() {
+			// Lazily load tables the first time the database is selected.
+			// Expanding/collapsing already loaded nodes is handled by the
+			// tree-level selected callback.
+			if len(dbNode.GetChildren()) == 0 {
+				loadTables(dbClinet, dbNode.GetText(), dbNode)
+			}
+		})
+		targetNode.AddChild(dbNode)
+	}
+}
+
+// loadTables fills targetNode with one child node per table of the given
+// database. Selecting a table node shows its records in the result table.
+func loadTables(dbClinet *DB, database string, targetNode *tview.TreeNode) {
+	tables, err := dbClinet.ShowDatabaseTables(database)
+	if err != nil {
+		PrintfTextView("[red]Error: %s", err)
+		return
+	}
+	if len(tables) == 0 {
+		PrintfTextView("[yellow]Status: no tables in database %s", database)
+		return
 	}
 	for _, table := range tables {
+		fullName := database + "." + table
 		node := tview.NewTreeNode(table).
-			SetText(table).
-			SetReference(table).
+			SetReference(fullName).
 			SetSelectable(true)
 
 		node.SetSelectedFunc(func() {
-			// execute sql and show results in table
-			query := "select * from " + node.GetText()
-			rawCmdResult, err := DbClinet.RawSqlCommand(query)
-			if err != nil {
-				PrintfTextView("[red]Error: %s", err)
-				ClearTableRecords()
-				return
-			}
-			if rawCmdResult.IsDQL {
-				FillTableWithQueryResult(rawCmdResult.Fields, rawCmdResult.Records)
-				PrintfTextView("[yellow]Status: Success !")
-				addCommandHistory(query)
-			} else {
-				rowAffected, err := rawCmdResult.Result.RowsAffected()
-				if err != nil {
-					PrintfTextView("[red]Error: %s", err)
-					ClearTableRecords()
-					return
-				}
-				lastInsertId, err := rawCmdResult.Result.LastInsertId()
-				if err != nil {
-					PrintfTextView("[red]Error: %s", err)
-					ClearTableRecords()
-					return
-
-				}
-				PrintfTextView("[yellow]Status: Success ! \n\t Rows affected: %d, Last Insert ID: %d", rowAffected, lastInsertId)
-				addCommandHistory(query)
-			}
-
+			showTableRecords(fullName)
 		})
 		targetNode.AddChild(node)
 	}
+}
+
+// showTableRecords executes "select * from <db>.<table>" and shows the rows
+// (with a header row of column names) in the result table.
+func showTableRecords(table string) {
+	query := "select * from " + table
+	rawCmdResult, err := DbClinet.RawSqlCommand(query)
+	if err != nil {
+		PrintfTextView("[red]Error: %s", err)
+		ClearTableRecords()
+		return
+	}
+	FillTableWithQueryResult(rawCmdResult.Fields, rawCmdResult.Records)
+	PrintfTextView("[yellow]Status: Success !")
+	addCommandHistory(query)
 }

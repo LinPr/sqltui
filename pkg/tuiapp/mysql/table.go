@@ -1,8 +1,6 @@
 package mysql
 
 import (
-	// "strings"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -10,44 +8,16 @@ import (
 var TableRecords *tview.Table
 
 func RenderTable() *tview.Table {
-	// SetBorderStyle()
-
 	table := tview.NewTable().
 		SetBorders(true).
 		SetSeparator('|').
 		SetFixed(1, 0).
+		SetSelectable(true, false).
 		Select(0, 0)
-
-	table.SetDoneFunc(
-		func(key tcell.Key) {
-			switch key {
-			case tcell.KeyEnter:
-				table.SetSelectable(true, true)
-			}
-		})
-
-	table.SetSelectedFunc(func(row int, column int) {
-		table.GetCell(row, column).SetTextColor(tcell.ColorRed)
-		table.SetSelectable(false, false)
-	})
 
 	table.SetBorder(true).SetTitle("[green]Result Table")
 
 	TableRecords = table
-
-	// lorem := strings.Split("Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.", " ")
-	// cols, rows := 10, 40
-	// word := 0
-	// for r := 0; r < rows; r++ {
-	// 	for c := 0; c < cols; c++ {
-	// 		color := tcell.ColorWhite
-	// 		if r == 0 {
-	// 			color = tcell.ColorYellow
-	// 		}
-	// 		SetCell(r, c, lorem[word], color)
-	// 		word = (word + 1) % len(lorem)
-	// 	}
-	// }
 
 	return TableRecords
 }
@@ -58,22 +28,30 @@ func ClearTableRecords() {
 
 func FillTableWithQueryResult(fields []string, result [][]string) {
 	TableRecords.Clear()
-	// 1. fill the first line with field names
+	// 1. fill the first line with field names (fixed, non-selectable header)
 	startRow := 0
-	if fields != nil {
+	if len(fields) > 0 {
 		for j, field := range fields {
-			SetCell(startRow, j, field, tcell.ColorYellow)
+			cell := tview.NewTableCell(field).
+				SetTextColor(tcell.ColorYellow).
+				SetAttributes(tcell.AttrBold).
+				SetAlign(tview.AlignCenter).
+				SetSelectable(false)
+			TableRecords.SetCell(startRow, j, cell)
 		}
 		startRow += 1
 	}
 
 	// 2. fill result
-	if result != nil {
-		for i, row := range result {
-			for j, cell := range row {
-				SetCell(startRow+i, j, cell, tcell.ColorWhite)
-			}
+	for i, row := range result {
+		for j, cell := range row {
+			SetCell(startRow+i, j, cell, tcell.ColorWhite)
 		}
+	}
+
+	TableRecords.ScrollToBeginning()
+	if len(result) > 0 {
+		TableRecords.Select(startRow, 0)
 	}
 }
 
@@ -84,7 +62,7 @@ func SetCell(row int, column int, text string, color tcell.Color) {
 	TableRecords.SetCell(row, column, cell)
 }
 
-// set new border style and return old one
+// SetBorderStyle sets a new global border style and returns the old one.
 func SetBorderStyle() *struct {
 	Horizontal  rune
 	Vertical    rune

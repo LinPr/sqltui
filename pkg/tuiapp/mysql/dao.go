@@ -3,15 +3,17 @@ package mysql
 import (
 	"database/sql"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
-	"log"
 	"strings"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 const (
 	// DQL
 	SELECT = "select"
 	SHOW   = "show"
+	DESC   = "desc"
+	DESCRB = "describe"
 
 	// DDL & DML & DCL & TCL ....
 )
@@ -65,12 +67,12 @@ type RawCommandResult struct {
 
 func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err error) {
 	cmd := strings.Split(strings.Trim(query, " "), " ")
-	if len(cmd) == 0 {
+	if len(cmd) == 0 || cmd[0] == "" {
 		return rawCmdResult, fmt.Errorf("empty query")
 	}
 
 	switch strings.ToLower(cmd[0]) {
-	case SELECT, SHOW:
+	case SELECT, SHOW, DESC, DESCRB:
 		rawCmdResult.IsDQL = true
 		rawCmdResult.Fields, rawCmdResult.Records, err = db.RawQuery(query)
 		return rawCmdResult, err
@@ -86,30 +88,17 @@ func (db *DB) RawQuery(query string) (fields []string, records [][]string, err e
 	if err != nil {
 		return nil, nil, err
 	}
+	defer rows.Close()
 
-	records, err = readRecords(rows)
+	// use the result set column names as the table header
+	fields, err = rows.Columns()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	query = strings.ToLower(strings.TrimSuffix(query, ";"))
-	words := strings.Split(query, " ")
-	var tableName string
-	for i, word := range words {
-		switch word {
-		case "from":
-			tableName = words[i+1]
-			break
-		case "show":
-			// TODO: 处理一些特殊情况
-		}
-	}
-
-	if tableName != "" {
-		fields, err = db.FetchTableFields(tableName)
-		if err != nil {
-			return nil, nil, err
-		}
+	records, err = readRecords(rows)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	return fields, records, nil
@@ -124,12 +113,12 @@ func (db *DB) RawExec(query string) (sql.Result, error) {
 }
 
 func (db *DB) ShowDatabases() ([]string, error) {
-
 	query := "show databases"
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var databases []string
 	for rows.Next() {
@@ -140,19 +129,20 @@ func (db *DB) ShowDatabases() ([]string, error) {
 		databases = append(databases, database)
 	}
 
-	return databases, nil
+	return databases, rows.Err()
 }
 
 func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
 	query := "show tables"
 	if database != "" {
-		query = fmt.Sprintf("show tables from %s", database)
+		query = fmt.Sprintf("show tables from `%s`", database)
 	}
 
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var tables []string
 	for rows.Next() {
@@ -162,7 +152,7 @@ func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
 		}
 		tables = append(tables, table)
 	}
-	return tables, nil
+	return tables, rows.Err()
 }
 
 func (db *DB) ShowCurrentDatabaseTables() ([]string, error) {
@@ -175,6 +165,7 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	records, err := readRecords(rows)
 	if err != nil {
@@ -194,6 +185,7 @@ func (db *DB) FetchTableRecords(table string) ([][]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	records, err := readRecords(rows)
 	if err != nil {
@@ -202,8 +194,8 @@ func (db *DB) FetchTableRecords(table string) ([][]string, error) {
 	return records, nil
 }
 
-func (db *DB) Close() {
-	db.Close()
+func (db *DB) Close() error {
+	return db.DB.Close()
 }
 
 func readRecords(rows *sql.Rows) ([][]string, error) {
@@ -213,7 +205,7 @@ func readRecords(rows *sql.Rows) ([][]string, error) {
 	}
 	var records [][]string
 	for rows.Next() {
-		record := make([]any, len(columns), len(columns))
+		record := make([]any, len(columns))
 		for i := range columns {
 			record[i] = &sql.RawBytes{}
 		}
@@ -226,9 +218,7 @@ func readRecords(rows *sql.Rows) ([][]string, error) {
 			field := string(*rawValue.(*sql.RawBytes))
 			currentRow = append(currentRow, field)
 		}
-		log.Printf("------ currentRow: %+v", currentRow)
 		records = append(records, currentRow)
 	}
-	log.Printf("------ records: %+v", records)
-	return records, nil
+	return records, rows.Err()
 }

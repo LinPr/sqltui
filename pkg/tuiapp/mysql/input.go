@@ -1,7 +1,6 @@
 package mysql
 
 import (
-	"log"
 	"os"
 	"strings"
 
@@ -9,8 +8,8 @@ import (
 	"github.com/rivo/tview"
 )
 
-// latest 100 histories
-var histories = readCommandHistroies()[:100]
+// keep at most 100 histories for autocompletion
+var histories = capStringSlice(readCommandHistroies(), 100)
 
 func RenderInputFiedl() *tview.InputField {
 
@@ -27,6 +26,9 @@ func RenderInputFiedl() *tview.InputField {
 		case tcell.KeyEnter:
 			// execute sql and show results in table
 			query := inputField.GetText()
+			if strings.TrimSpace(query) == "" {
+				return
+			}
 			rawCmdResult, err := DbClinet.RawSqlCommand(query)
 			if err != nil {
 				PrintfTextView("[red]Error: %s", err)
@@ -54,10 +56,6 @@ func RenderInputFiedl() *tview.InputField {
 				PrintfTextView("[yellow]Status: Success ! \n\t Rows affected: %d, Last Insert ID: %d", rowAffected, lastInsertId)
 				addCommandHistory(query)
 			}
-
-		case tcell.KeyEscape:
-			log.Println("KeyEscape pressed")
-			// TODO:
 		}
 	})
 
@@ -81,7 +79,6 @@ func RenderInputFiedl() *tview.InputField {
 		}
 		return source == tview.AutocompletedEnter || source == tview.AutocompletedClick
 	})
-	// inputField.SetBorder(true)
 
 	return inputField
 }
@@ -109,6 +106,13 @@ func distinctStringSlice(histories []string) []string {
 		histories = append(histories, k)
 	}
 	return histories
+}
+
+func capStringSlice(s []string, n int) []string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 func addCommandHistory(command string) {

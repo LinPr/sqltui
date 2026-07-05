@@ -1,7 +1,6 @@
 package redis
 
 import (
-	"log"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -30,7 +29,7 @@ func RenderInputFiedl() *tview.InputField {
 	inputField.SetDoneFunc(func(key tcell.Key) {
 		switch key {
 		case tcell.KeyEnter:
-			// execute sql and show results in table
+			// execute the redis command and show results in the result view
 			args := strings.Split(inputField.GetText(), " ")
 			result, err := RdsClinet.ExecuteRawQuery(args)
 			if err != nil {
@@ -38,12 +37,11 @@ func RenderInputFiedl() *tview.InputField {
 				ClearResultTextView()
 				return
 			}
+			ClearErrTextView()
 			PrintfResultTextView("[yellow]%s", result)
 			addCommandHistory(inputField.GetText())
-
-		case tcell.KeyEscape:
-			log.Println("KeyEscape pressed")
-			// TODO:
+			// the command may have created or deleted keys
+			RefreshKeyTree()
 		}
 	})
 

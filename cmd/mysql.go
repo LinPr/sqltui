@@ -1,6 +1,3 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -10,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// mysqlCmd represents the mysql command
 var mysqlCmd = &cobra.Command{
 	Use:   "mysql",
 	Short: "start a mysql tui",
@@ -31,6 +27,4 @@ var mysqlCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(mysqlCmd)
-
-	// mysqlCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

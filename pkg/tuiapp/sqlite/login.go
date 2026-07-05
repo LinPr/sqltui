@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/LinPr/sqltui/pkg/config"
 	"github.com/LinPr/sqltui/pkg/tuiapp"
@@ -11,7 +10,6 @@ import (
 )
 
 func RenderLoginPage() *tview.Flex {
-
 	form := renderLoginForm()
 	textView := renderLoginErrTextView()
 
@@ -19,13 +17,11 @@ func RenderLoginPage() *tview.Flex {
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 1, false).
-			AddItem(form, 15, 3, true).
+			AddItem(form, 9, 3, true).
 			AddItem(textView, 0, 1, false), 50, 3, true).
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false)
 
 	flex.SetBorder(true)
-
-	// tuiapp.SqliteTui.AddPage("sqlite_login", form)
 
 	return flex
 }
@@ -39,16 +35,14 @@ func printfLoginErrOut(format string, a ...any) {
 }
 
 func renderLoginForm() *tview.Form {
-	sqliteConf, err := config.ReadSqliteConfig()
-	if err != nil {
-		log.Println("ReadSqliteConfig error: ", err)
-		return nil
+	filePath := ""
+	if sqliteConf, err := config.ReadSqliteConfig(); err == nil && sqliteConf != nil {
+		filePath = sqliteConf.FilePath
 	}
 
 	form := tview.NewForm().
-		AddInputField("filepath:", sqliteConf.FilePath, 25, nil, nil).
+		AddInputField("filepath:", filePath, 35, nil, nil).
 		SetFieldBackgroundColor(tcell.ColorGray)
-	// AddDropDown(" charset:", []string{"utf8", "ascall", "unicode"}, 0, nil)
 
 	form.AddButton("Connect", ConnectCallback(form)).
 		AddButton("Save", SaveCallback(form)).
@@ -57,17 +51,15 @@ func renderLoginForm() *tview.Form {
 		SetButtonBackgroundColor(tcell.ColorGray).
 		SetButtonTextColor(tcell.ColorLightGoldenrodYellow)
 
-	form.SetBorder(true).SetBorderColor(tcell.ColorWhite)
+	form.SetBorder(true).SetBorderColor(tcell.ColorWhite).SetTitle("[green]Sqlite Login")
 
 	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		log.Println("event: ", event.Key())
 		switch event.Key() {
 		case tcell.KeyCtrlS:
 			SaveCallback(form)()
 
 		case tcell.KeyEnter:
 			ConnectCallback(form)()
-
 		}
 		return event
 	})
@@ -86,63 +78,36 @@ func renderLoginErrTextView() *tview.TextView {
 
 func ConnectCallback(form *tview.Form) func() {
 	return func() {
-		// count := form.GetFormItemCount()
-		// for i := 0; i < count; i++ {
-		// 	log.Println(form.GetFormItem(i).GetLabel())
-		// 	log.Println(form.GetFormItem(i).(*tview.InputField).GetText())
-		// }
-		// username := form.GetFormItem(0).(*tview.InputField).GetText()
-		// password := form.GetFormItem(1).(*tview.InputField).GetText()
-		// host := form.GetFormItem(2).(*tview.InputField).GetText()
-		// port := form.GetFormItem(3).(*tview.InputField).GetText()
-		// rdbNumStr := form.GetFormItem(4).(*tview.InputField).GetText()
-		// rdbNum, err := strconv.Atoi(rdbNumStr)
-		// if err != nil {
-		// 	printfLoginErrOut("[red]" + err.Error())
-		// 	return
-		// }
+		filePath := form.GetFormItem(0).(*tview.InputField).GetText()
 
-		// rdsc, err := NewRDS(&redis.Options{
-		// 	Addr:         fmt.Sprintf("%s:%s", host, port),
-		// 	Username:     username,
-		// 	Password:     password,
-		// 	DB:           rdbNum,
-		// 	WriteTimeout: 3 * time.Second,
-		// 	ReadTimeout:  2 * time.Second,
-		// }) // mmust init database client here
-		// if err != nil {
-		// 	printfLoginErrOut("[red]" + err.Error())
-		// 	return
-		// }
-		// _ = rdsc
+		// must init database client here
+		if _, err := NewDB(filePath); err != nil {
+			printfLoginErrOut("[red]%s", err.Error())
+			return
+		}
 
-		// // save current config
-		// SaveCallback(form)()
+		// save current config
+		SaveCallback(form)()
 
-		// // SetRootTreeNodeName(GetDbName())
-		// tuiapp.RedisTui.ShowPage("redis_dashboard")
+		RefreshTree()
+		tuiapp.SqliteTui.ShowPage("sqlite_dashboard")
 	}
 }
 
 func SaveCallback(form *tview.Form) func() {
 	return func() {
-		redisConf := &config.RedisConfig{
-			UserName: form.GetFormItem(0).(*tview.InputField).GetText(),
-			Password: form.GetFormItem(1).(*tview.InputField).GetText(),
-			Host:     form.GetFormItem(2).(*tview.InputField).GetText(),
-			Port:     form.GetFormItem(3).(*tview.InputField).GetText(),
-			RdbNum:   form.GetFormItem(4).(*tview.InputField).GetText(),
+		sqliteConf := &config.SqliteConfig{
+			FilePath: form.GetFormItem(0).(*tview.InputField).GetText(),
 		}
 
-		if err := config.WriteRedisConfig(redisConf); err != nil {
-			log.Println("WriteMysqlConfig error: ", err)
+		if err := config.WriteSqliteConfig(sqliteConf); err != nil {
+			printfLoginErrOut("[red]WriteSqliteConfig error: %s", err)
 		}
 	}
 }
 
 func QuitCallback() func() {
 	return func() {
-		// app.Stop()
-		tuiapp.RedisTui.App.Stop()
+		tuiapp.SqliteTui.App.Stop()
 	}
 }

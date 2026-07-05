@@ -2,7 +2,6 @@ package redis
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -36,6 +35,9 @@ func RenderLoginPage() *tview.Flex {
 var LoginErrOut *tview.TextView
 
 func printfLoginErrOut(format string, a ...any) {
+	if LoginErrOut == nil {
+		return
+	}
 	LoginErrOut.Clear()
 	erMsg := fmt.Sprintf(format, a...)
 	LoginErrOut.SetText(erMsg)
@@ -44,13 +46,14 @@ func printfLoginErrOut(format string, a ...any) {
 func renderLoginForm() *tview.Form {
 	redisConf, err := config.ReadRedisConfig()
 	if err != nil {
-		log.Println("ReadRedisConfig error: ", err)
-		return nil
+		// fall back to an empty config, the user can still type everything in
+		redisConf = &config.RedisConfig{}
+		printfLoginErrOut("[red]ReadRedisConfig error: %s", err)
 	}
 
 	form := tview.NewForm().
 		AddInputField("username:", redisConf.UserName, 25, nil, nil).
-		AddInputField("password:", redisConf.Password, 25, nil, nil).
+		AddPasswordField("password:", redisConf.Password, 25, '*', nil).
 		AddInputField("    host:", redisConf.Host, 25, nil, nil).
 		AddInputField("    port:", redisConf.Port, 25, nil, nil).
 		AddInputField("  rdbNum:", redisConf.RdbNum, 25, nil, nil).
@@ -67,7 +70,6 @@ func renderLoginForm() *tview.Form {
 	form.SetBorder(true).SetBorderColor(tcell.ColorWhite)
 
 	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		log.Println("event: ", event.Key())
 		switch event.Key() {
 		case tcell.KeyCtrlS:
 			SaveCallback(form)()
@@ -93,11 +95,6 @@ func renderLoginErrTextView() *tview.TextView {
 
 func ConnectCallback(form *tview.Form) func() {
 	return func() {
-		count := form.GetFormItemCount()
-		for i := 0; i < count; i++ {
-			log.Println(form.GetFormItem(i).GetLabel())
-			log.Println(form.GetFormItem(i).(*tview.InputField).GetText())
-		}
 		username := form.GetFormItem(0).(*tview.InputField).GetText()
 		password := form.GetFormItem(1).(*tview.InputField).GetText()
 		host := form.GetFormItem(2).(*tview.InputField).GetText()
@@ -105,7 +102,7 @@ func ConnectCallback(form *tview.Form) func() {
 		rdbNumStr := form.GetFormItem(4).(*tview.InputField).GetText()
 		rdbNum, err := strconv.Atoi(rdbNumStr)
 		if err != nil {
-			printfLoginErrOut("[red]" + err.Error())
+			printfLoginErrOut("[red]%s", err.Error())
 			return
 		}
 
@@ -116,9 +113,9 @@ func ConnectCallback(form *tview.Form) func() {
 			DB:           rdbNum,
 			WriteTimeout: 3 * time.Second,
 			ReadTimeout:  2 * time.Second,
-		}) // mmust init database client here
+		}) // must init database client here
 		if err != nil {
-			printfLoginErrOut("[red]" + err.Error())
+			printfLoginErrOut("[red]%s", err.Error())
 			return
 		}
 		_ = rdsc
@@ -142,7 +139,7 @@ func SaveCallback(form *tview.Form) func() {
 		}
 
 		if err := config.WriteRedisConfig(redisConf); err != nil {
-			log.Println("WriteMysqlConfig error: ", err)
+			printfLoginErrOut("[red]WriteRedisConfig error: %s", err)
 		}
 	}
 }

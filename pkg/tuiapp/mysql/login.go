@@ -22,8 +22,6 @@ func RenderLoginPage() *tview.Flex {
 			AddItem(textView, 0, 1, false), 50, 3, true).
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false)
 
-	// tuiapp.MysqlTui.AddPage("mysql_login", form)
-
 	return flex
 }
 
@@ -31,17 +29,16 @@ func renderLoginForm() *tview.Form {
 	mysqlConf, err := config.ReadMySqlConfig()
 	if err != nil {
 		log.Println("ReadMySqlConfig error: ", err)
-		return nil
+		mysqlConf = &config.MysqlConfig{}
 	}
 
 	form := tview.NewForm().
 		AddInputField("username:", mysqlConf.UserName, 25, nil, nil).
-		AddInputField("password:", mysqlConf.Password, 25, nil, nil).
+		AddPasswordField("password:", mysqlConf.Password, 25, '*', nil).
 		AddInputField("    host:", mysqlConf.Host, 25, nil, nil).
 		AddInputField("    port:", mysqlConf.Port, 25, nil, nil).
 		AddInputField("  dbname:", mysqlConf.DbName, 25, nil, nil).
 		SetFieldBackgroundColor(tcell.ColorGray)
-	// AddDropDown(" charset:", []string{"utf8", "ascall", "unicode"}, 0, nil)
 
 	form.AddButton("Connect", ConnectCallback(form)).
 		AddButton("Save", SaveCallback(form)).
@@ -50,7 +47,7 @@ func renderLoginForm() *tview.Form {
 		SetButtonBackgroundColor(tcell.ColorGray).
 		SetButtonTextColor(tcell.ColorLightGoldenrodYellow)
 
-	form.SetBorder(true).SetBorderColor(tcell.ColorWhite)
+	form.SetBorder(true).SetBorderColor(tcell.ColorWhite).SetTitle("[green]Mysql Login")
 
 	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
@@ -86,11 +83,6 @@ func renderLoginErrTextView() *tview.TextView {
 
 func ConnectCallback(form *tview.Form) func() {
 	return func() {
-		count := form.GetFormItemCount()
-		for i := 0; i < count; i++ {
-			log.Println(form.GetFormItem(i).GetLabel())
-			log.Println(form.GetFormItem(i).(*tview.InputField).GetText())
-		}
 		username := form.GetFormItem(0).(*tview.InputField).GetText()
 		password := form.GetFormItem(1).(*tview.InputField).GetText()
 		host := form.GetFormItem(2).(*tview.InputField).GetText()
@@ -98,15 +90,12 @@ func ConnectCallback(form *tview.Form) func() {
 		dbname := form.GetFormItem(4).(*tview.InputField).GetText()
 
 		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8", username, password, host, port, dbname)
-		log.Println(dsn)
 
-		dbc, err := NewDB(dsn) // mmust init database client here
-		if err != nil {
-			printfLoginErrOut("[red]" + err.Error())
+		if _, err := NewDB(dsn); err != nil { // must init database client here
+			printfLoginErrOut("[red]%s", err.Error())
 			return
 		}
-
-		_ = dbc
+		printfLoginErrOut("")
 
 		// save current config
 		SaveCallback(form)()
@@ -126,14 +115,13 @@ func SaveCallback(form *tview.Form) func() {
 			DbName:   form.GetFormItem(4).(*tview.InputField).GetText(),
 		}
 		if err := config.WriteMysqlConfig(mysqlConfig); err != nil {
-			log.Println("WriteMysqlConfig error: ", err)
+			printfLoginErrOut("[red]WriteMysqlConfig error: %s", err.Error())
 		}
 	}
 }
 
 func QuitCallback() func() {
 	return func() {
-		// app.Stop()
 		tuiapp.MysqlTui.App.Stop()
 	}
 }

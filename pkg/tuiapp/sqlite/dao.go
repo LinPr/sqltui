@@ -3,16 +3,19 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"os"
+	"strings"
 
 	_ "modernc.org/sqlite"
-	"strings"
 )
 
 const (
 	// DQL
-	SELECT = "select"
-	SHOW   = "show"
+	SELECT  = "select"
+	PRAGMA  = "pragma"
+	WITH    = "with"
+	EXPLAIN = "explain"
+	VALUES  = "values"
 
 	// DDL & DML & DCL & TCL ....
 )
@@ -27,16 +30,33 @@ type DB struct {
 }
 
 func NewDB(file string) (*DB, error) {
-	if DbClinet != nil {
+	file = strings.TrimSpace(file)
+	if file == "" {
+		return nil, fmt.Errorf("sqlite file path is empty")
+	}
+
+	// reuse the cached client only if it points to the same file
+	if DbClinet != nil && DbClinet.File == file {
 		return DbClinet, nil
 	}
+
+	if _, err := os.Stat(file); err != nil {
+		return nil, err
+	}
+
 	dbc, err := sql.Open("sqlite", file)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := dbc.Ping(); err != nil {
+		dbc.Close()
 		return nil, err
+	}
+
+	// replace the previously cached client (re-login with another file)
+	if DbClinet != nil {
+		DbClinet.DB.Close()
 	}
 
 	DbClinet = &DB{
@@ -51,6 +71,9 @@ func GetDB() *DB {
 }
 
 func GetDbFile() string {
+	if DbClinet == nil {
+		return ""
+	}
 	return DbClinet.File
 }
 
@@ -62,13 +85,13 @@ type RawCommandResult struct {
 }
 
 func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err error) {
-	cmd := strings.Split(strings.Trim(query, " "), " ")
-	if len(cmd) == 0 {
+	words := strings.Fields(strings.TrimSpace(query))
+	if len(words) == 0 {
 		return rawCmdResult, fmt.Errorf("empty query")
 	}
 
-	switch strings.ToLower(cmd[0]) {
-	case SELECT, SHOW:
+	switch strings.ToLower(words[0]) {
+	case SELECT, PRAGMA, WITH, EXPLAIN, VALUES:
 		rawCmdResult.IsDQL = true
 		rawCmdResult.Fields, rawCmdResult.Records, err = db.RawQuery(query)
 		return rawCmdResult, err
@@ -84,30 +107,16 @@ func (db *DB) RawQuery(query string) (fields []string, records [][]string, err e
 	if err != nil {
 		return nil, nil, err
 	}
+	defer rows.Close()
 
-	records, err = readRecords(rows)
+	fields, err = rows.Columns()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	query = strings.ToLower(strings.TrimSuffix(query, ";"))
-	words := strings.Split(query, " ")
-	var tableName string
-	for i, word := range words {
-		switch word {
-		case "from":
-			tableName = words[i+1]
-			break
-		case "show":
-			// TODO: 处理一些特殊情况
-		}
-	}
-
-	if tableName != "" {
-		fields, err = db.FetchTableFields(tableName)
-		if err != nil {
-			return nil, nil, err
-		}
+	records, err = readRecords(rows)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	return fields, records, nil
@@ -121,36 +130,14 @@ func (db *DB) RawExec(query string) (sql.Result, error) {
 	return res, nil
 }
 
-func (db *DB) ShowDatabases() ([]string, error) {
-
-	query := "show databases"
+// ListTables lists all user tables of the sqlite database file.
+func (db *DB) ListTables() ([]string, error) {
+	query := "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
-
-	var databases []string
-	for rows.Next() {
-		var database string
-		if err := rows.Scan(&database); err != nil {
-			return nil, err
-		}
-		databases = append(databases, database)
-	}
-
-	return databases, nil
-}
-
-func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
-	query := "show tables"
-	if database != "" {
-		query = fmt.Sprintf("show tables from %s", database)
-	}
-
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, err
-	}
+	defer rows.Close()
 
 	var tables []string
 	for rows.Next() {
@@ -160,48 +147,46 @@ func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
 		}
 		tables = append(tables, table)
 	}
-	return tables, nil
+	return tables, rows.Err()
 }
 
-func (db *DB) ShowCurrentDatabaseTables() ([]string, error) {
-	return db.ShowDatabaseTables("")
-}
-
+// FetchTableFields returns the column names of a table via PRAGMA table_info.
 func (db *DB) FetchTableFields(table string) ([]string, error) {
-	query := fmt.Sprintf("describe %s", table)
+	query := fmt.Sprintf("PRAGMA table_info(%q)", table)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	records, err := readRecords(rows)
 	if err != nil {
 		return nil, err
 	}
 
-	fields := []string{}
+	// PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+	fields := make([]string, 0, len(records))
 	for _, record := range records {
-		fields = append(fields, record[0])
+		if len(record) > 1 {
+			fields = append(fields, record[1])
+		}
 	}
 	return fields, nil
 }
 
 func (db *DB) FetchTableRecords(table string) ([][]string, error) {
-	query := fmt.Sprintf("select * from %s", table)
+	query := fmt.Sprintf("select * from %q", table)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	records, err := readRecords(rows)
-	if err != nil {
-		return nil, err
-	}
-	return records, nil
+	return readRecords(rows)
 }
 
-func (db *DB) Close() {
-	db.Close()
+func (db *DB) Close() error {
+	return db.DB.Close()
 }
 
 func readRecords(rows *sql.Rows) ([][]string, error) {
@@ -211,22 +196,19 @@ func readRecords(rows *sql.Rows) ([][]string, error) {
 	}
 	var records [][]string
 	for rows.Next() {
-		record := make([]any, len(columns), len(columns))
-		for i := range columns {
+		record := make([]any, len(columns))
+		for i := range record {
 			record[i] = &sql.RawBytes{}
 		}
 
-		if err = rows.Scan(record...); err != nil {
+		if err := rows.Scan(record...); err != nil {
 			return nil, err
 		}
-		var currentRow []string
+		currentRow := make([]string, 0, len(columns))
 		for _, rawValue := range record {
-			field := string(*rawValue.(*sql.RawBytes))
-			currentRow = append(currentRow, field)
+			currentRow = append(currentRow, string(*rawValue.(*sql.RawBytes)))
 		}
-		log.Printf("------ currentRow: %+v", currentRow)
 		records = append(records, currentRow)
 	}
-	log.Printf("------ records: %+v", records)
-	return records, nil
+	return records, rows.Err()
 }

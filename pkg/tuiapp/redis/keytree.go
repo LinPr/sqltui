@@ -1,8 +1,6 @@
 package redis
 
 import (
-	"log"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -32,7 +30,7 @@ func RenderKeyTreeView() *tview.TreeView {
 
 	RootTreeNode.SetSelectedFunc(func() {
 		if RootTreeNode.GetReference() == false {
-			// Selecting the root node d
+			// Selecting the root node loads the key type nodes
 			loadRedisTypes(RootTreeNode)
 			RootTreeNode.SetReference(RootTreeNode.GetText())
 			return
@@ -46,6 +44,18 @@ func RenderKeyTreeView() *tview.TreeView {
 	return tree
 }
 
+// RefreshKeyTree re-scans the redis keys so that keys created or deleted by
+// commands show up in the tree. Type nodes are reloaded lazily on selection.
+func RefreshKeyTree() {
+	if RootTreeNode == nil || RootTreeNode.GetReference() == false {
+		// tree has not been loaded yet, nothing to refresh
+		return
+	}
+	RootTreeNode.ClearChildren()
+	loadRedisTypes(RootTreeNode)
+	RootTreeNode.SetExpanded(true)
+}
+
 func loadRedisTypes(targetNode *tview.TreeNode) {
 	for _, keyType := range RedisKeyTypes {
 		node := tview.NewTreeNode("[orange]" + keyType).
@@ -56,21 +66,19 @@ func loadRedisTypes(targetNode *tview.TreeNode) {
 		node.SetSelectedFunc(func() {
 
 			if node.GetReference() == false {
-				node.SetReference(node.GetText())
 				keys, err := RdsClinet.Scan(0, "*", 0, keyType)
 				if err != nil {
-					log.Println(err)
+					PrintfErrTextView("[red]Error: %s", err)
+					return
 				}
-				log.Printf("redis keys: %+v", keys)
+				node.SetReference(node.GetText())
 
 				for _, key := range keys {
 					loadRedisKey(node, key)
 				}
 			}
 
-			log.Printf("node children: %+v", node.GetChildren())
 			if len(node.GetChildren()) > 0 {
-				log.Printf("node isExpanded: %+v", node.IsExpanded())
 				node.SetExpanded(!node.IsExpanded())
 			}
 		})
@@ -87,12 +95,14 @@ func loadRedisKey(targetNode *tview.TreeNode, key string) {
 		SetSelectable(true)
 
 	node.SetSelectedFunc(func() {
-		// fetch key value
+		// fetch key value (TYPE is inspected inside GetValue)
 		value, err := RdsClinet.GetValue(key)
 		if err != nil {
-			log.Println(err)
+			PrintfErrTextView("[red]Error: %s", err)
+			return
 		}
 
+		ClearErrTextView()
 		PrintfResultTextView("[yellow]%s", value)
 	})
 
