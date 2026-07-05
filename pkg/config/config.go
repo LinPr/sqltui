@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 )
 
 var dataPath = os.Getenv("HOME") + "/.config/sqltui"
@@ -25,10 +26,24 @@ type RedisConfig struct {
 	Port     string `json:"port" yaml:"port"`
 	RdbNum   string `json:"rdbNum" yaml:"rdbNum"`
 }
+type SqliteConfig struct {
+	FilePath string `json:"filePath" yaml:"filePath"`
+}
+
+type PostgresConfig struct {
+	UserName string `json:"userName" yaml:"userName"`
+	Password string `json:"password" yaml:"password"`
+	Host     string `json:"host" yaml:"host"`
+	Port     string `json:"port" yaml:"port"`
+	DbName   string `json:"dbName" yaml:"dbName"`
+	SslMode  string `json:"sslMode" yaml:"sslMode"`
+}
 
 type SqlConfig struct {
-	Mysql *MysqlConfig `json:"mysql" yaml:"mysql"`
-	Redis *RedisConfig `json:"redis" yaml:"redis"`
+	Mysql    *MysqlConfig    `json:"mysql" yaml:"mysql"`
+	Redis    *RedisConfig    `json:"redis" yaml:"redis"`
+	Sqlite   *SqliteConfig   `json:"sqlite" yaml:"sqlite"`
+	Postgres *PostgresConfig `json:"postgres" yaml:"postgres"`
 }
 
 func init() {
@@ -65,6 +80,17 @@ func SetDefaultConfig() error {
 					Port:     "6379",
 					RdbNum:   "0",
 				},
+				Sqlite: &SqliteConfig{
+					FilePath: filepath.Join(dataPath, "sqlite.default"),
+				},
+				Postgres: &PostgresConfig{
+					UserName: "postgres",
+					Password: "",
+					Host:     "127.0.0.1",
+					Port:     "5432",
+					DbName:   "postgres",
+					SslMode:  "disable",
+				},
 			}
 
 			j, err := json.MarshalIndent(sqlConfig, "", "  ")
@@ -75,6 +101,7 @@ func SetDefaultConfig() error {
 			if err := os.WriteFile(ConfigFile, j, 0666); err != nil {
 				return err
 			}
+			return nil
 		}
 		return err
 	}
@@ -136,6 +163,79 @@ func WriteRedisConfig(redisConfig *RedisConfig) error {
 		return err
 	}
 	tmpConf.Redis = redisConfig
+	j, err := json.MarshalIndent(tmpConf, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(ConfigFile, j, 0666); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ReadSqliteConfig() (*SqliteConfig, error) {
+	conf, err := os.ReadFile(ConfigFile)
+	if err != nil {
+		return nil, err
+	}
+	var tmpConf SqlConfig
+	if err := json.Unmarshal(conf, &tmpConf); err != nil {
+		return nil, err
+	}
+	return tmpConf.Sqlite, nil
+}
+
+func WriteSqliteConfig(sqliteConfig *SqliteConfig) error {
+	conf, err := os.ReadFile(ConfigFile)
+	if err != nil {
+		return err
+	}
+	var tmpConf SqlConfig
+	if err := json.Unmarshal(conf, &tmpConf); err != nil {
+		return err
+	}
+	tmpConf.Sqlite = sqliteConfig
+	j, err := json.MarshalIndent(tmpConf, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(ConfigFile, j, 0666); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ReadPostgresConfig() (*PostgresConfig, error) {
+	conf, err := os.ReadFile(ConfigFile)
+	if err != nil {
+		return nil, err
+	}
+	var tmpConf SqlConfig
+	if err := json.Unmarshal(conf, &tmpConf); err != nil {
+		return nil, err
+	}
+	if tmpConf.Postgres == nil {
+		tmpConf.Postgres = &PostgresConfig{
+			UserName: "postgres",
+			Host:     "127.0.0.1",
+			Port:     "5432",
+			DbName:   "postgres",
+			SslMode:  "disable",
+		}
+	}
+	return tmpConf.Postgres, nil
+}
+
+func WritePostgresConfig(postgresConfig *PostgresConfig) error {
+	conf, err := os.ReadFile(ConfigFile)
+	if err != nil {
+		return err
+	}
+	var tmpConf SqlConfig
+	if err := json.Unmarshal(conf, &tmpConf); err != nil {
+		return err
+	}
+	tmpConf.Postgres = postgresConfig
 	j, err := json.MarshalIndent(tmpConf, "", "  ")
 	if err != nil {
 		return err

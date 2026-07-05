@@ -49,11 +49,11 @@ func renderLoginForm() *tview.Form {
 	}
 
 	form := tview.NewForm().
-		AddInputField("username:", redisConf.UserName, 20, nil, nil).
-		AddInputField("password:", redisConf.Password, 20, nil, nil).
-		AddInputField("    host:", redisConf.Host, 20, nil, nil).
-		AddInputField("    port:", redisConf.Port, 20, nil, nil).
-		AddInputField("  rdbNum:", redisConf.RdbNum, 20, nil, nil).
+		AddInputField("username:", redisConf.UserName, 25, nil, nil).
+		AddInputField("password:", redisConf.Password, 25, nil, nil).
+		AddInputField("    host:", redisConf.Host, 25, nil, nil).
+		AddInputField("    port:", redisConf.Port, 25, nil, nil).
+		AddInputField("  rdbNum:", redisConf.RdbNum, 25, nil, nil).
 		SetFieldBackgroundColor(tcell.ColorGray)
 	// AddDropDown(" charset:", []string{"utf8", "ascall", "unicode"}, 0, nil)
 

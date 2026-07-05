@@ -1,4 +1,4 @@
-package mysql
+package sqlite
 
 import (
 	"fmt"
@@ -11,6 +11,7 @@ import (
 )
 
 func RenderLoginPage() *tview.Flex {
+
 	form := renderLoginForm()
 	textView := renderLoginErrTextView()
 
@@ -22,24 +23,30 @@ func RenderLoginPage() *tview.Flex {
 			AddItem(textView, 0, 1, false), 50, 3, true).
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false)
 
-	// tuiapp.MysqlTui.AddPage("mysql_login", form)
+	flex.SetBorder(true)
+
+	// tuiapp.SqliteTui.AddPage("sqlite_login", form)
 
 	return flex
 }
 
+var LoginErrOut *tview.TextView
+
+func printfLoginErrOut(format string, a ...any) {
+	LoginErrOut.Clear()
+	erMsg := fmt.Sprintf(format, a...)
+	LoginErrOut.SetText(erMsg)
+}
+
 func renderLoginForm() *tview.Form {
-	mysqlConf, err := config.ReadMySqlConfig()
+	sqliteConf, err := config.ReadSqliteConfig()
 	if err != nil {
-		log.Println("ReadMySqlConfig error: ", err)
+		log.Println("ReadSqliteConfig error: ", err)
 		return nil
 	}
 
 	form := tview.NewForm().
-		AddInputField("username:", mysqlConf.UserName, 25, nil, nil).
-		AddInputField("password:", mysqlConf.Password, 25, nil, nil).
-		AddInputField("    host:", mysqlConf.Host, 25, nil, nil).
-		AddInputField("    port:", mysqlConf.Port, 25, nil, nil).
-		AddInputField("  dbname:", mysqlConf.DbName, 25, nil, nil).
+		AddInputField("filepath:", sqliteConf.FilePath, 25, nil, nil).
 		SetFieldBackgroundColor(tcell.ColorGray)
 	// AddDropDown(" charset:", []string{"utf8", "ascall", "unicode"}, 0, nil)
 
@@ -53,6 +60,7 @@ func renderLoginForm() *tview.Form {
 	form.SetBorder(true).SetBorderColor(tcell.ColorWhite)
 
 	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		log.Println("event: ", event.Key())
 		switch event.Key() {
 		case tcell.KeyCtrlS:
 			SaveCallback(form)()
@@ -67,14 +75,6 @@ func renderLoginForm() *tview.Form {
 	return form
 }
 
-var LoginErrOut *tview.TextView
-
-func printfLoginErrOut(format string, a ...any) {
-	LoginErrOut.Clear()
-	erMsg := fmt.Sprintf(format, a...)
-	LoginErrOut.SetText(erMsg)
-}
-
 func renderLoginErrTextView() *tview.TextView {
 	textView := tview.NewTextView().
 		SetWrap(true).
@@ -86,46 +86,55 @@ func renderLoginErrTextView() *tview.TextView {
 
 func ConnectCallback(form *tview.Form) func() {
 	return func() {
-		count := form.GetFormItemCount()
-		for i := 0; i < count; i++ {
-			log.Println(form.GetFormItem(i).GetLabel())
-			log.Println(form.GetFormItem(i).(*tview.InputField).GetText())
-		}
-		username := form.GetFormItem(0).(*tview.InputField).GetText()
-		password := form.GetFormItem(1).(*tview.InputField).GetText()
-		host := form.GetFormItem(2).(*tview.InputField).GetText()
-		port := form.GetFormItem(3).(*tview.InputField).GetText()
-		dbname := form.GetFormItem(4).(*tview.InputField).GetText()
+		// count := form.GetFormItemCount()
+		// for i := 0; i < count; i++ {
+		// 	log.Println(form.GetFormItem(i).GetLabel())
+		// 	log.Println(form.GetFormItem(i).(*tview.InputField).GetText())
+		// }
+		// username := form.GetFormItem(0).(*tview.InputField).GetText()
+		// password := form.GetFormItem(1).(*tview.InputField).GetText()
+		// host := form.GetFormItem(2).(*tview.InputField).GetText()
+		// port := form.GetFormItem(3).(*tview.InputField).GetText()
+		// rdbNumStr := form.GetFormItem(4).(*tview.InputField).GetText()
+		// rdbNum, err := strconv.Atoi(rdbNumStr)
+		// if err != nil {
+		// 	printfLoginErrOut("[red]" + err.Error())
+		// 	return
+		// }
 
-		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8", username, password, host, port, dbname)
-		log.Println(dsn)
+		// rdsc, err := NewRDS(&redis.Options{
+		// 	Addr:         fmt.Sprintf("%s:%s", host, port),
+		// 	Username:     username,
+		// 	Password:     password,
+		// 	DB:           rdbNum,
+		// 	WriteTimeout: 3 * time.Second,
+		// 	ReadTimeout:  2 * time.Second,
+		// }) // mmust init database client here
+		// if err != nil {
+		// 	printfLoginErrOut("[red]" + err.Error())
+		// 	return
+		// }
+		// _ = rdsc
 
-		dbc, err := NewDB(dsn) // mmust init database client here
-		if err != nil {
-			printfLoginErrOut("[red]" + err.Error())
-			return
-		}
+		// // save current config
+		// SaveCallback(form)()
 
-		_ = dbc
-
-		// save current config
-		SaveCallback(form)()
-
-		SetRootTreeNodeName(GetDbName())
-		tuiapp.MysqlTui.ShowPage("mysql_dashboard")
+		// // SetRootTreeNodeName(GetDbName())
+		// tuiapp.RedisTui.ShowPage("redis_dashboard")
 	}
 }
 
 func SaveCallback(form *tview.Form) func() {
 	return func() {
-		mysqlConfig := &config.MysqlConfig{
+		redisConf := &config.RedisConfig{
 			UserName: form.GetFormItem(0).(*tview.InputField).GetText(),
 			Password: form.GetFormItem(1).(*tview.InputField).GetText(),
 			Host:     form.GetFormItem(2).(*tview.InputField).GetText(),
 			Port:     form.GetFormItem(3).(*tview.InputField).GetText(),
-			DbName:   form.GetFormItem(4).(*tview.InputField).GetText(),
+			RdbNum:   form.GetFormItem(4).(*tview.InputField).GetText(),
 		}
-		if err := config.WriteMysqlConfig(mysqlConfig); err != nil {
+
+		if err := config.WriteRedisConfig(redisConf); err != nil {
 			log.Println("WriteMysqlConfig error: ", err)
 		}
 	}
@@ -134,6 +143,6 @@ func SaveCallback(form *tview.Form) func() {
 func QuitCallback() func() {
 	return func() {
 		// app.Stop()
-		tuiapp.MysqlTui.App.Stop()
+		tuiapp.RedisTui.App.Stop()
 	}
 }

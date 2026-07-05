@@ -16,15 +16,19 @@ type TuiApp struct {
 }
 
 var (
-	// TuiApp *tuiApp
-	MysqlTui *TuiApp
-	RedisTui *TuiApp
-	// Pages    *tview.Pages
-	// Widget   []tview.Primitive
+	MysqlTui    *TuiApp
+	SqliteTui   *TuiApp
+	RedisTui    *TuiApp
+	PostgresTui *TuiApp
 )
 
 func init() {
 	MysqlTui = &TuiApp{
+		App:    tview.NewApplication(),
+		Pages:  tview.NewPages(),
+		Widget: make([]tview.Primitive, 0),
+	}
+	SqliteTui = &TuiApp{
 		App:    tview.NewApplication(),
 		Pages:  tview.NewPages(),
 		Widget: make([]tview.Primitive, 0),
@@ -34,9 +38,11 @@ func init() {
 		Pages:  tview.NewPages(),
 		Widget: make([]tview.Primitive, 0),
 	}
-	// Pages = tview.NewPages()
-	// Widget = make([]tview.Primitive, 0)
-
+	PostgresTui = &TuiApp{
+		App:    tview.NewApplication(),
+		Pages:  tview.NewPages(),
+		Widget: make([]tview.Primitive, 0),
+	}
 }
 
 func (ta *TuiApp) GetPage() *tview.Pages {
@@ -63,6 +69,11 @@ func (ta *TuiApp) GetCurrentFocus() tview.Primitive {
 func (ta *TuiApp) SetNextFocus() {
 	wiget := ta.GetCurrentFocus()
 	ta.App.SetFocus(ta.NextWigets(wiget))
+}
+
+func (ta *TuiApp) SetPreviousFocus() {
+	wiget := ta.GetCurrentFocus()
+	ta.App.SetFocus(ta.PreviousWidgets(wiget))
 }
 
 func (ta *TuiApp) PreviousWidgets(curent tview.Primitive) tview.Primitive {
