@@ -30,7 +30,7 @@ func RenderDashBoardPage() tview.Primitive {
 	treeView := renderTreeView()
 	queryWidget := renderQueryWidget()
 	table := renderTable()
-	helpBar := renderHelpBar()
+	helpBar := tuiapp.RenderHelpBar("Tab/Shift+Tab: switch focus | Ctrl+R: run query | Esc: back to login | Ctrl+Q: quit")
 
 	tuiapp.PostgresTui.AddWidget(treeView)
 	tuiapp.PostgresTui.AddWidget(QueryArea)
@@ -71,17 +71,10 @@ func RenderDashBoardPage() tview.Primitive {
 	return flex
 }
 
-func renderHelpBar() *tview.TextView {
-	helpBar := tview.NewTextView().
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft).
-		SetText("[yellow]Tab/Shift+Tab: switch focus | Ctrl+R: run query | Esc: back to login | Ctrl+Q: quit")
-	return helpBar
-}
-
 func renderQueryWidget() *tview.Flex {
 	queryArea := tview.NewTextArea().
-		SetPlaceholder("Enter postgres query here, press Ctrl+R to run...")
+		SetPlaceholder("Enter postgres query here, press Ctrl+R to run...").
+		SetPlaceholderStyle(tcell.StyleDefault.Background(tcell.ColorBlack).Foreground(tcell.ColorGray))
 	QueryArea = queryArea
 
 	textView := renderMessageTextView()
@@ -108,7 +101,7 @@ func renderMessageTextView() *tview.TextView {
 
 func PrintfMessageView(format string, a ...any) {
 	messageOut.Clear()
-	fmt.Fprintf(messageOut, format, a...)
+	fmt.Fprintf(messageOut, format, tuiapp.EscapeArgs(a)...)
 }
 
 func runQuery() {
@@ -151,7 +144,7 @@ func SetRootTreeNodeName(dbName string) {
 	if dbName == "" {
 		dbName = "postgres"
 	}
-	RootTreeNode.SetText(dbName)
+	RootTreeNode.SetText(tview.Escape(dbName))
 }
 
 func renderTreeView() *tview.TreeView {
@@ -203,7 +196,7 @@ func ReloadSchemas() error {
 
 	RootTreeNode.ClearChildren()
 	for _, schema := range schemas {
-		node := tview.NewTreeNode(schema).
+		node := tview.NewTreeNode(tview.Escape(schema)).
 			SetReference(schemaRef{schema: schema}).
 			SetSelectable(true).
 			SetColor(tcell.ColorGreen)
@@ -231,7 +224,7 @@ func loadTables(schemaNode *tview.TreeNode, schema string) {
 	}
 
 	for _, table := range tables {
-		node := tview.NewTreeNode(table).
+		node := tview.NewTreeNode(tview.Escape(table)).
 			SetReference(tableRef{schema: schema, table: table}).
 			SetSelectable(true)
 		schemaNode.AddChild(node)
@@ -263,19 +256,8 @@ func renderTable() *tview.Table {
 		SetBorders(true).
 		SetSeparator('|').
 		SetFixed(1, 0).
+		SetSelectable(true, false).
 		Select(0, 0)
-
-	table.SetDoneFunc(func(key tcell.Key) {
-		switch key {
-		case tcell.KeyEnter:
-			table.SetSelectable(true, true)
-		}
-	})
-
-	table.SetSelectedFunc(func(row int, column int) {
-		table.GetCell(row, column).SetTextColor(tcell.ColorRed)
-		table.SetSelectable(false, false)
-	})
 
 	table.SetBorder(true).SetTitle("[green]Result Table")
 
@@ -290,11 +272,16 @@ func ClearTableRecords() {
 func FillTableWithQueryResult(fields []string, result [][]string) {
 	TableRecords.Clear()
 
-	// 1. fill the first line with field names
+	// 1. fill the first line with field names (fixed, non-selectable header)
 	startRow := 0
-	if fields != nil {
+	if len(fields) > 0 {
 		for j, field := range fields {
-			setCell(startRow, j, field, tcell.ColorYellow)
+			cell := tview.NewTableCell(tview.Escape(field)).
+				SetTextColor(tcell.ColorYellow).
+				SetAttributes(tcell.AttrBold).
+				SetAlign(tview.AlignCenter).
+				SetSelectable(false)
+			TableRecords.SetCell(startRow, j, cell)
 		}
 		startRow += 1
 	}
@@ -305,10 +292,15 @@ func FillTableWithQueryResult(fields []string, result [][]string) {
 			setCell(startRow+i, j, cell, tcell.ColorWhite)
 		}
 	}
+
+	TableRecords.ScrollToBeginning()
+	if len(result) > 0 {
+		TableRecords.Select(startRow, 0)
+	}
 }
 
 func setCell(row int, column int, text string, color tcell.Color) {
-	cell := tview.NewTableCell(text).
+	cell := tview.NewTableCell(tview.Escape(text)).
 		SetTextColor(color).
 		SetAlign(tview.AlignCenter)
 	TableRecords.SetCell(row, column, cell)

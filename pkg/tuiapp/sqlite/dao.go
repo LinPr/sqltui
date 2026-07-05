@@ -18,6 +18,9 @@ const (
 	VALUES  = "values"
 
 	// DDL & DML & DCL & TCL ....
+
+	// max rows fetched when browsing a table from the tree view
+	FetchLimit = 200
 )
 
 var (
@@ -152,7 +155,7 @@ func (db *DB) ListTables() ([]string, error) {
 
 // FetchTableFields returns the column names of a table via PRAGMA table_info.
 func (db *DB) FetchTableFields(table string) ([]string, error) {
-	query := fmt.Sprintf("PRAGMA table_info(%q)", table)
+	query := fmt.Sprintf("PRAGMA table_info(%s)", quoteIdentifier(table))
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -175,7 +178,7 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 }
 
 func (db *DB) FetchTableRecords(table string) ([][]string, error) {
-	query := fmt.Sprintf("select * from %q", table)
+	query := fmt.Sprintf("select * from %s limit %d", quoteIdentifier(table), FetchLimit)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -187,6 +190,12 @@ func (db *DB) FetchTableRecords(table string) ([][]string, error) {
 
 func (db *DB) Close() error {
 	return db.DB.Close()
+}
+
+// quoteIdentifier quotes a sqlite identifier with double quotes, doubling
+// any embedded double quote.
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func readRecords(rows *sql.Rows) ([][]string, error) {

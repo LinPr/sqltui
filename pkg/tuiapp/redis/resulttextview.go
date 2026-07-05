@@ -3,6 +3,7 @@ package redis
 import (
 	"fmt"
 
+	"github.com/LinPr/sqltui/pkg/tuiapp"
 	"github.com/rivo/tview"
 )
 
@@ -10,7 +11,7 @@ var resultTextViewOut *tview.TextView
 
 func PrintfResultTextView(format string, a ...any) {
 	resultTextViewOut.Clear()
-	fmt.Fprintf(resultTextViewOut, format, a...)
+	fmt.Fprintf(resultTextViewOut, format, tuiapp.EscapeArgs(a)...)
 }
 
 func PrintlnResultTextView(a ...any) {
@@ -31,7 +32,7 @@ func RenderResultTextView() *tview.TextView {
 			// app.Draw()
 		})
 
-	textView.SetBorder(true).SetTitle("Result")
+	textView.SetBorder(true).SetTitle("[green]Result")
 
 	resultTextViewOut = textView
 	return textView

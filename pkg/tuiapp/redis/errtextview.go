@@ -2,6 +2,8 @@ package redis
 
 import (
 	"fmt"
+
+	"github.com/LinPr/sqltui/pkg/tuiapp"
 	"github.com/rivo/tview"
 )
 
@@ -10,7 +12,7 @@ var errTextViewOut *tview.TextView
 // This wiil be used when the inputField capture the enter key
 func PrintfErrTextView(format string, a ...any) {
 	errTextViewOut.Clear()
-	fmt.Fprintf(errTextViewOut, format, a...)
+	fmt.Fprintf(errTextViewOut, format, tuiapp.EscapeArgs(a)...)
 }
 
 func PrintlnErrTextView(a ...any) {

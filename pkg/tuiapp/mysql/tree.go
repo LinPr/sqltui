@@ -1,6 +1,8 @@
 package mysql
 
 import (
+	"fmt"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -13,7 +15,7 @@ func SetRootTreeNodeName(dbName string) {
 	if dbName == "" {
 		dbName = "mysql"
 	}
-	RootTreeNode.SetText(dbName)
+	RootTreeNode.SetText(tview.Escape(dbName))
 	RootTreeNode.ClearChildren()
 	loadDatabases(GetDB(), RootTreeNode)
 	RootTreeNode.SetReference("root")
@@ -60,7 +62,7 @@ func loadDatabases(dbClinet *DB, targetNode *tview.TreeNode) {
 		return
 	}
 	for _, database := range databases {
-		dbNode := tview.NewTreeNode(database).
+		dbNode := tview.NewTreeNode(tview.Escape(database)).
 			SetReference(database).
 			SetColor(tcell.ColorGreen).
 			SetSelectable(true)
@@ -70,7 +72,7 @@ func loadDatabases(dbClinet *DB, targetNode *tview.TreeNode) {
 			// Expanding/collapsing already loaded nodes is handled by the
 			// tree-level selected callback.
 			if len(dbNode.GetChildren()) == 0 {
-				loadTables(dbClinet, dbNode.GetText(), dbNode)
+				loadTables(dbClinet, database, dbNode)
 			}
 		})
 		targetNode.AddChild(dbNode)
@@ -91,12 +93,12 @@ func loadTables(dbClinet *DB, database string, targetNode *tview.TreeNode) {
 	}
 	for _, table := range tables {
 		fullName := database + "." + table
-		node := tview.NewTreeNode(table).
+		node := tview.NewTreeNode(tview.Escape(table)).
 			SetReference(fullName).
 			SetSelectable(true)
 
 		node.SetSelectedFunc(func() {
-			showTableRecords(fullName)
+			showTableRecords(database, table)
 		})
 		targetNode.AddChild(node)
 	}
@@ -104,8 +106,9 @@ func loadTables(dbClinet *DB, database string, targetNode *tview.TreeNode) {
 
 // showTableRecords executes "select * from <db>.<table>" and shows the rows
 // (with a header row of column names) in the result table.
-func showTableRecords(table string) {
-	query := "select * from " + table
+func showTableRecords(database, table string) {
+	query := fmt.Sprintf("select * from %s.%s limit %d",
+		quoteIdent(database), quoteIdent(table), FetchLimit)
 	rawCmdResult, err := DbClinet.RawSqlCommand(query)
 	if err != nil {
 		PrintfTextView("[red]Error: %s", err)
@@ -113,6 +116,7 @@ func showTableRecords(table string) {
 		return
 	}
 	FillTableWithQueryResult(rawCmdResult.Fields, rawCmdResult.Records)
-	PrintfTextView("[yellow]Status: Success !")
+	PrintfTextView("[yellow]Status: Success ! %d row(s) fetched (limit %d)",
+		len(rawCmdResult.Records), FetchLimit)
 	addCommandHistory(query)
 }

@@ -10,12 +10,15 @@ func RenderDashBoardPage() *tview.Flex {
 	treeView := RenderTreeView()
 	queryWidget := RenderQueryWidget()
 	table := RenderTable()
-	helpBar := RenderHelpBar()
+	helpBar := tuiapp.RenderHelpBar("Tab/Shift+Tab: switch focus | Enter/Ctrl+R: run query | Esc: back to login | Ctrl+Q: quit")
+
+	// register widgets in visual order: tree -> query input -> result table
 	tuiapp.MysqlTui.AddWidget(treeView)
+	tuiapp.MysqlTui.AddWidget(queryInput)
 	tuiapp.MysqlTui.AddWidget(table)
 
 	body := tview.NewFlex().
-		AddItem(treeView, 20, 1, true).
+		AddItem(treeView, 30, 1, true).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(queryWidget, 0, 1, false).
 			AddItem(table, 0, 3, false), 0, 2, false)
@@ -29,8 +32,13 @@ func RenderDashBoardPage() *tview.Flex {
 		switch event.Key() {
 		case tcell.KeyTab:
 			tuiapp.MysqlTui.SetNextFocus()
+			return nil
 		case tcell.KeyBacktab:
 			tuiapp.MysqlTui.SetPreviousFocus()
+			return nil
+		case tcell.KeyCtrlR:
+			runInputQuery()
+			return nil
 		case tcell.KeyEscape:
 			tuiapp.MysqlTui.ShowPage("mysql_login")
 			return nil
@@ -41,15 +49,5 @@ func RenderDashBoardPage() *tview.Flex {
 		return event // this event should be returned and not to return nil
 	})
 
-	tuiapp.MysqlTui.AddPage("mysql_dashboard", flex)
-
 	return flex
-}
-
-func RenderHelpBar() *tview.TextView {
-	helpBar := tview.NewTextView().
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignCenter).
-		SetText("[yellow]Tab[white]/[yellow]Shift+Tab[white]: switch focus | [yellow]Enter[white]: run query / select | [yellow]Esc[white]: back to login | [yellow]Ctrl+Q[white]: quit")
-	return helpBar
 }

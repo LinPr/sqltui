@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/LinPr/sqltui/pkg/config"
 	"github.com/LinPr/sqltui/pkg/tuiapp"
@@ -11,8 +10,10 @@ import (
 )
 
 func RenderLoginPage() *tview.Flex {
-	form := renderLoginForm()
+	// build the error text view first so that errors during form
+	// construction (e.g. a corrupt config file) are shown on screen
 	textView := renderLoginErrTextView()
+	form := renderLoginForm()
 
 	flex := tview.NewFlex().
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false).
@@ -28,8 +29,8 @@ func RenderLoginPage() *tview.Flex {
 func renderLoginForm() *tview.Form {
 	mysqlConf, err := config.ReadMySqlConfig()
 	if err != nil {
-		log.Println("ReadMySqlConfig error: ", err)
 		mysqlConf = &config.MysqlConfig{}
+		printfLoginErrOut("[red]ReadMySqlConfig error: %s", err)
 	}
 
 	form := tview.NewForm().
@@ -53,10 +54,7 @@ func renderLoginForm() *tview.Form {
 		switch event.Key() {
 		case tcell.KeyCtrlS:
 			SaveCallback(form)()
-
-		case tcell.KeyEnter:
-			ConnectCallback(form)()
-
+			return nil
 		}
 		return event
 	})
@@ -67,8 +65,11 @@ func renderLoginForm() *tview.Form {
 var LoginErrOut *tview.TextView
 
 func printfLoginErrOut(format string, a ...any) {
+	if LoginErrOut == nil {
+		return
+	}
 	LoginErrOut.Clear()
-	erMsg := fmt.Sprintf(format, a...)
+	erMsg := fmt.Sprintf(format, tuiapp.EscapeArgs(a)...)
 	LoginErrOut.SetText(erMsg)
 }
 
@@ -91,8 +92,8 @@ func ConnectCallback(form *tview.Form) func() {
 
 		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8", username, password, host, port, dbname)
 
-		if _, err := NewDB(dsn); err != nil { // must init database client here
-			printfLoginErrOut("[red]%s", err.Error())
+		if _, err := NewDB(dsn, dbname); err != nil { // must init database client here
+			printfLoginErrOut("[red]Error: %s", err.Error())
 			return
 		}
 		printfLoginErrOut("")

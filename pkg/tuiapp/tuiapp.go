@@ -99,3 +99,30 @@ func (ta *TuiApp) NextWigets(curent tview.Primitive) tview.Primitive {
 	}
 	return ta.Widget[0]
 }
+
+// RenderHelpBar builds the one-line help bar shown at the bottom of every
+// dashboard, with a single shared color scheme and alignment.
+func RenderHelpBar(text string) *tview.TextView {
+	return tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignCenter).
+		SetText("[yellow]" + text)
+}
+
+// EscapeArgs escapes tview style tags in every string/error argument so that
+// dynamic values coming from the database or user input are rendered
+// verbatim instead of being interpreted as color/region tags.
+func EscapeArgs(a []any) []any {
+	escaped := make([]any, len(a))
+	for i, arg := range a {
+		switch v := arg.(type) {
+		case string:
+			escaped[i] = tview.Escape(v)
+		case error:
+			escaped[i] = tview.Escape(v.Error())
+		default:
+			escaped[i] = arg
+		}
+	}
+	return escaped
+}

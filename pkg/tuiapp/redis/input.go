@@ -16,6 +16,29 @@ func addCommandHistory(cmd string) {
 	}
 }
 
+var queryInput *tview.InputField
+
+// runInputQuery executes the redis command currently typed in the query
+// input field and shows the result. It is triggered by Enter in the input
+// field and by Ctrl+R anywhere on the dashboard.
+func runInputQuery() {
+	args := strings.Fields(queryInput.GetText())
+	if len(args) == 0 {
+		return
+	}
+	result, err := RdsClinet.ExecuteRawQuery(args)
+	if err != nil {
+		PrintfErrTextView("[red]Error: %s", err)
+		ClearResultTextView()
+		return
+	}
+	ClearErrTextView()
+	PrintfResultTextView("[yellow]%s", result)
+	addCommandHistory(queryInput.GetText())
+	// the command may have created or deleted keys
+	RefreshKeyTree()
+}
+
 func RenderInputFiedl() *tview.InputField {
 
 	inputField := tview.NewInputField().
@@ -26,22 +49,13 @@ func RenderInputFiedl() *tview.InputField {
 		SetAutocompleteStyles(tcell.ColorBlack, tcell.StyleDefault, tcell.StyleDefault.Foreground(tcell.ColorGreen).Background(tcell.ColorGray)).
 		SetFieldWidth(1024)
 
+	queryInput = inputField
+
 	inputField.SetDoneFunc(func(key tcell.Key) {
 		switch key {
 		case tcell.KeyEnter:
 			// execute the redis command and show results in the result view
-			args := strings.Split(inputField.GetText(), " ")
-			result, err := RdsClinet.ExecuteRawQuery(args)
-			if err != nil {
-				PrintfErrTextView("[red]Error: %s", err)
-				ClearResultTextView()
-				return
-			}
-			ClearErrTextView()
-			PrintfResultTextView("[yellow]%s", result)
-			addCommandHistory(inputField.GetText())
-			// the command may have created or deleted keys
-			RefreshKeyTree()
+			runInputQuery()
 		}
 	})
 

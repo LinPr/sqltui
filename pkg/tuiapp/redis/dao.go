@@ -9,26 +9,24 @@ import (
 
 var RdsClinet *RDS
 
+// max keys collected when browsing a key type from the tree view
+const ScanLimit = 500
+
 type RDS struct {
 	rdsc *redis.Client
 }
 
 func NewRDS(rdsOpt *redis.Options) (*RDS, error) {
-	if RdsClinet != nil {
-		return RdsClinet, nil
-	}
-
-	// rdb := redis.NewClient(&redis.Options{
-	// 	Addr:     "localhost:6379",
-	// 	Username: "",
-	// 	Password: "", // no password set
-	// 	DB:       0,  // use default DB
-	// })
-
 	rdsc := redis.NewClient(rdsOpt)
 
 	if _, err := rdsc.Ping(context.Background()).Result(); err != nil {
+		rdsc.Close()
 		return nil, err
+	}
+
+	// close the previous connection when re-connecting
+	if RdsClinet != nil {
+		RdsClinet.rdsc.Close()
 	}
 
 	RdsClinet = &RDS{
@@ -57,6 +55,11 @@ func (rds *RDS) Scan(cursor uint64, match string, count int64, keyType string) (
 	var keys []string
 	for iter.Next(context.Background()) {
 		keys = append(keys, iter.Val())
+		if len(keys) >= ScanLimit {
+			// cap the number of keys so a huge keyspace does not
+			// freeze the UI or build an unbounded tree
+			break
+		}
 	}
 	if err := iter.Err(); err != nil {
 		return nil, err
@@ -102,8 +105,8 @@ func (rds *RDS) GetValue(key string) (string, error) {
 		}
 		return FormatJson(val)
 
-	case "bitmap":
-		val, err := rds.rdsc.GetBit(context.Background(), key, 0).Result()
+	case "stream":
+		val, err := rds.rdsc.XRange(context.Background(), key, "-", "+").Result()
 		if err != nil {
 			return "", err
 		}

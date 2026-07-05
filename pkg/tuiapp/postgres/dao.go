@@ -3,6 +3,7 @@ package postgres
 import (
 	"database/sql"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ const (
 	WITH    = "with"
 	SHOW    = "show"
 	EXPLAIN = "explain"
+	VALUES  = "values"
+	TABLE   = "table"
 
 	// max rows fetched when browsing a table from the tree view
 	FetchLimit = 200
@@ -37,14 +40,14 @@ func BuildDsn(userName, password, host, port, dbName, sslMode string) string {
 	if sslMode == "" {
 		sslMode = "disable"
 	}
-	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		url.QueryEscape(userName),
-		url.QueryEscape(password),
-		host,
-		port,
-		url.PathEscape(dbName),
-		url.QueryEscape(sslMode),
-	)
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(userName, password),
+		Host:     net.JoinHostPort(host, port),
+		Path:     "/" + dbName,
+		RawQuery: "sslmode=" + url.QueryEscape(sslMode),
+	}
+	return u.String()
 }
 
 func NewDB(dsn string, dbName string) (*DB, error) {
@@ -96,15 +99,30 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	}
 
 	switch strings.ToLower(words[0]) {
-	case SELECT, WITH, SHOW, EXPLAIN:
+	case SELECT, WITH, SHOW, EXPLAIN, VALUES, TABLE:
 		rawCmdResult.IsDQL = true
+	default:
+		// INSERT/UPDATE/DELETE ... RETURNING also produces a result set
+		rawCmdResult.IsDQL = hasReturningClause(words)
+	}
+
+	if rawCmdResult.IsDQL {
 		rawCmdResult.Fields, rawCmdResult.Records, err = db.RawQuery(query)
 		return rawCmdResult, err
-	default:
-		rawCmdResult.IsDQL = false
-		rawCmdResult.Result, err = db.RawExec(query)
-		return rawCmdResult, err
 	}
+	rawCmdResult.Result, err = db.RawExec(query)
+	return rawCmdResult, err
+}
+
+// hasReturningClause reports whether the statement contains a RETURNING
+// clause, whose result set would be silently discarded by db.Exec.
+func hasReturningClause(words []string) bool {
+	for _, word := range words[1:] {
+		if strings.EqualFold(word, "returning") {
+			return true
+		}
+	}
+	return false
 }
 
 func (db *DB) RawQuery(query string) (fields []string, records [][]string, err error) {

@@ -9,7 +9,7 @@ import (
 
 var dataPath = os.Getenv("HOME") + "/.config/sqltui"
 var LogFile = dataPath + "/sqltui.log"
-var ConfigFile = dataPath + "/config.yaml"
+var ConfigFile = dataPath + "/config.json"
 
 type MysqlConfig struct {
 	UserName string `json:"userName" yaml:"userName"`
@@ -98,7 +98,7 @@ func SetDefaultConfig() error {
 				return err
 			}
 
-			if err := os.WriteFile(ConfigFile, j, 0666); err != nil {
+			if err := os.WriteFile(ConfigFile, j, 0600); err != nil {
 				return err
 			}
 			return nil
@@ -106,7 +106,31 @@ func SetDefaultConfig() error {
 		return err
 	}
 
-	return nil
+	// tighten the permissions of a pre-existing config file, since it
+	// stores database passwords in plaintext
+	return os.Chmod(ConfigFile, 0600)
+}
+
+// readSqlConfig reads and parses the config file. When the file is missing
+// or corrupt it returns a zero SqlConfig so that saving still works.
+func readSqlConfig() SqlConfig {
+	var tmpConf SqlConfig
+	conf, err := os.ReadFile(ConfigFile)
+	if err != nil {
+		return SqlConfig{}
+	}
+	if err := json.Unmarshal(conf, &tmpConf); err != nil {
+		return SqlConfig{}
+	}
+	return tmpConf
+}
+
+func writeSqlConfig(tmpConf SqlConfig) error {
+	j, err := json.MarshalIndent(tmpConf, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(ConfigFile, j, 0600)
 }
 
 func ReadMySqlConfig() (*MysqlConfig, error) {
@@ -118,27 +142,21 @@ func ReadMySqlConfig() (*MysqlConfig, error) {
 	if err := json.Unmarshal(conf, &tmpConf); err != nil {
 		return nil, err
 	}
+	if tmpConf.Mysql == nil {
+		tmpConf.Mysql = &MysqlConfig{
+			UserName: "root",
+			Host:     "127.0.0.1",
+			Port:     "3306",
+			DbName:   "test_db",
+		}
+	}
 	return tmpConf.Mysql, nil
 }
 
 func WriteMysqlConfig(mysqlConfig *MysqlConfig) error {
-	conf, err := os.ReadFile(ConfigFile)
-	if err != nil {
-		return err
-	}
-	var tmpConf SqlConfig
-	if err := json.Unmarshal(conf, &tmpConf); err != nil {
-		return err
-	}
+	tmpConf := readSqlConfig()
 	tmpConf.Mysql = mysqlConfig
-	j, err := json.MarshalIndent(tmpConf, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(ConfigFile, j, 0666); err != nil {
-		return err
-	}
-	return nil
+	return writeSqlConfig(tmpConf)
 }
 
 func ReadRedisConfig() (*RedisConfig, error) {
@@ -150,27 +168,20 @@ func ReadRedisConfig() (*RedisConfig, error) {
 	if err := json.Unmarshal(conf, &tmpConf); err != nil {
 		return nil, err
 	}
+	if tmpConf.Redis == nil {
+		tmpConf.Redis = &RedisConfig{
+			Host:   "127.0.0.1",
+			Port:   "6379",
+			RdbNum: "0",
+		}
+	}
 	return tmpConf.Redis, nil
 }
 
 func WriteRedisConfig(redisConfig *RedisConfig) error {
-	conf, err := os.ReadFile(ConfigFile)
-	if err != nil {
-		return err
-	}
-	var tmpConf SqlConfig
-	if err := json.Unmarshal(conf, &tmpConf); err != nil {
-		return err
-	}
+	tmpConf := readSqlConfig()
 	tmpConf.Redis = redisConfig
-	j, err := json.MarshalIndent(tmpConf, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(ConfigFile, j, 0666); err != nil {
-		return err
-	}
-	return nil
+	return writeSqlConfig(tmpConf)
 }
 
 func ReadSqliteConfig() (*SqliteConfig, error) {
@@ -182,27 +193,18 @@ func ReadSqliteConfig() (*SqliteConfig, error) {
 	if err := json.Unmarshal(conf, &tmpConf); err != nil {
 		return nil, err
 	}
+	if tmpConf.Sqlite == nil {
+		tmpConf.Sqlite = &SqliteConfig{
+			FilePath: filepath.Join(dataPath, "sqlite.default"),
+		}
+	}
 	return tmpConf.Sqlite, nil
 }
 
 func WriteSqliteConfig(sqliteConfig *SqliteConfig) error {
-	conf, err := os.ReadFile(ConfigFile)
-	if err != nil {
-		return err
-	}
-	var tmpConf SqlConfig
-	if err := json.Unmarshal(conf, &tmpConf); err != nil {
-		return err
-	}
+	tmpConf := readSqlConfig()
 	tmpConf.Sqlite = sqliteConfig
-	j, err := json.MarshalIndent(tmpConf, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(ConfigFile, j, 0666); err != nil {
-		return err
-	}
-	return nil
+	return writeSqlConfig(tmpConf)
 }
 
 func ReadPostgresConfig() (*PostgresConfig, error) {
@@ -227,28 +229,20 @@ func ReadPostgresConfig() (*PostgresConfig, error) {
 }
 
 func WritePostgresConfig(postgresConfig *PostgresConfig) error {
-	conf, err := os.ReadFile(ConfigFile)
-	if err != nil {
-		return err
-	}
-	var tmpConf SqlConfig
-	if err := json.Unmarshal(conf, &tmpConf); err != nil {
-		return err
-	}
+	tmpConf := readSqlConfig()
 	tmpConf.Postgres = postgresConfig
-	j, err := json.MarshalIndent(tmpConf, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(ConfigFile, j, 0666); err != nil {
-		return err
-	}
-	return nil
+	return writeSqlConfig(tmpConf)
 }
 
 func SetDefaultLog() error {
+	// truncate an oversized log at startup so it does not grow without bound
+	const maxLogSize = 1 << 20 // 1 MB
+	flag := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if info, err := os.Stat(LogFile); err == nil && info.Size() > maxLogSize {
+		flag = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	}
 
-	file, err := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	file, err := os.OpenFile(LogFile, flag, 0644)
 	if err != nil {
 		return err
 	}

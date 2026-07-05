@@ -11,6 +11,45 @@ import (
 // keep at most 100 histories for autocompletion
 var histories = capStringSlice(readCommandHistroies(), 100)
 
+var queryInput *tview.InputField
+
+// runInputQuery executes the sql command currently typed in the query input
+// field and shows the result. It is triggered by Enter in the input field
+// and by Ctrl+R anywhere on the dashboard.
+func runInputQuery() {
+	query := queryInput.GetText()
+	if strings.TrimSpace(query) == "" {
+		return
+	}
+	rawCmdResult, err := DbClinet.RawSqlCommand(query)
+	if err != nil {
+		PrintfTextView("[red]Error: %s", err)
+		ClearTableRecords()
+		return
+	}
+	if rawCmdResult.IsDQL {
+		FillTableWithQueryResult(rawCmdResult.Fields, rawCmdResult.Records)
+		PrintfTextView("[yellow]Status: Success !")
+		addCommandHistory(query)
+	} else {
+		rowAffected, err := rawCmdResult.Result.RowsAffected()
+		if err != nil {
+			PrintfTextView("[red]Error: %s", err)
+			ClearTableRecords()
+			return
+		}
+		lastInsertId, err := rawCmdResult.Result.LastInsertId()
+		if err != nil {
+			PrintfTextView("[red]Error: %s", err)
+			ClearTableRecords()
+			return
+
+		}
+		PrintfTextView("[yellow]Status: Success ! \n\t Rows affected: %d, Last Insert ID: %d", rowAffected, lastInsertId)
+		addCommandHistory(query)
+	}
+}
+
 func RenderInputFiedl() *tview.InputField {
 
 	inputField := tview.NewInputField().
@@ -21,41 +60,13 @@ func RenderInputFiedl() *tview.InputField {
 		SetAutocompleteStyles(tcell.ColorBlack, tcell.StyleDefault, tcell.StyleDefault.Foreground(tcell.ColorGreen).Background(tcell.ColorGray)).
 		SetFieldWidth(1024)
 
+	queryInput = inputField
+
 	inputField.SetDoneFunc(func(key tcell.Key) {
 		switch key {
 		case tcell.KeyEnter:
 			// execute sql and show results in table
-			query := inputField.GetText()
-			if strings.TrimSpace(query) == "" {
-				return
-			}
-			rawCmdResult, err := DbClinet.RawSqlCommand(query)
-			if err != nil {
-				PrintfTextView("[red]Error: %s", err)
-				ClearTableRecords()
-				return
-			}
-			if rawCmdResult.IsDQL {
-				FillTableWithQueryResult(rawCmdResult.Fields, rawCmdResult.Records)
-				PrintfTextView("[yellow]Status: Success !")
-				addCommandHistory(query)
-			} else {
-				rowAffected, err := rawCmdResult.Result.RowsAffected()
-				if err != nil {
-					PrintfTextView("[red]Error: %s", err)
-					ClearTableRecords()
-					return
-				}
-				lastInsertId, err := rawCmdResult.Result.LastInsertId()
-				if err != nil {
-					PrintfTextView("[red]Error: %s", err)
-					ClearTableRecords()
-					return
-
-				}
-				PrintfTextView("[yellow]Status: Success ! \n\t Rows affected: %d, Last Insert ID: %d", rowAffected, lastInsertId)
-				addCommandHistory(query)
-			}
+			runInputQuery()
 		}
 	})
 

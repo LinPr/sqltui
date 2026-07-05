@@ -2,6 +2,8 @@ package mysql
 
 import (
 	"fmt"
+
+	"github.com/LinPr/sqltui/pkg/tuiapp"
 	"github.com/rivo/tview"
 )
 
@@ -10,7 +12,7 @@ var textViewOut *tview.TextView
 // This wiil be used when the inputField capture the enter key
 func PrintfTextView(format string, a ...any) {
 	textViewOut.Clear()
-	fmt.Fprintf(textViewOut, format, a...)
+	fmt.Fprintf(textViewOut, format, tuiapp.EscapeArgs(a)...)
 }
 
 func PrintlnTextView(a ...any) {

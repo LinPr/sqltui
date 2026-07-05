@@ -13,7 +13,7 @@ var RedisKeyTypes = []string{
 	"Set",
 	"Zset",
 	"Hash",
-	"Bitmap",
+	"Stream",
 }
 
 func RenderKeyTreeView() *tview.TreeView {
@@ -66,7 +66,7 @@ func loadRedisTypes(targetNode *tview.TreeNode) {
 		node.SetSelectedFunc(func() {
 
 			if node.GetReference() == false {
-				keys, err := RdsClinet.Scan(0, "*", 0, keyType)
+				keys, err := RdsClinet.Scan(0, "*", 100, keyType)
 				if err != nil {
 					PrintfErrTextView("[red]Error: %s", err)
 					return
@@ -75,6 +75,9 @@ func loadRedisTypes(targetNode *tview.TreeNode) {
 
 				for _, key := range keys {
 					loadRedisKey(node, key)
+				}
+				if len(keys) >= ScanLimit {
+					PrintfErrTextView("[yellow]Status: showing the first %d %s keys only", ScanLimit, keyType)
 				}
 			}
 
@@ -89,8 +92,7 @@ func loadRedisTypes(targetNode *tview.TreeNode) {
 }
 
 func loadRedisKey(targetNode *tview.TreeNode, key string) {
-	node := tview.NewTreeNode(key).
-		SetText(key).
+	node := tview.NewTreeNode(tview.Escape(key)).
 		SetReference(nil).
 		SetSelectable(true)
 

@@ -32,7 +32,7 @@ func FillTableWithQueryResult(fields []string, result [][]string) {
 	startRow := 0
 	if len(fields) > 0 {
 		for j, field := range fields {
-			cell := tview.NewTableCell(field).
+			cell := tview.NewTableCell(tview.Escape(field)).
 				SetTextColor(tcell.ColorYellow).
 				SetAttributes(tcell.AttrBold).
 				SetAlign(tview.AlignCenter).
@@ -56,7 +56,7 @@ func FillTableWithQueryResult(fields []string, result [][]string) {
 }
 
 func SetCell(row int, column int, text string, color tcell.Color) {
-	cell := tview.NewTableCell(text).
+	cell := tview.NewTableCell(tview.Escape(text)).
 		SetTextColor(color).
 		SetAlign(tview.AlignCenter)
 	TableRecords.SetCell(row, column, cell)

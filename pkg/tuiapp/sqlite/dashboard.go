@@ -22,7 +22,7 @@ func RenderDashBoardPage() *tview.Flex {
 	treeView := renderTreeView()
 	queryWidget := renderQueryWidget()
 	table := renderTable()
-	helpBar := renderHelpBar()
+	helpBar := tuiapp.RenderHelpBar("Tab/Shift+Tab: switch focus | Ctrl+R: run query | Esc: back to login | Ctrl+Q: quit")
 
 	tuiapp.SqliteTui.AddWidget(treeView)
 	tuiapp.SqliteTui.AddWidget(QueryArea)
@@ -62,14 +62,6 @@ func RenderDashBoardPage() *tview.Flex {
 	return flex
 }
 
-func renderHelpBar() *tview.TextView {
-	helpBar := tview.NewTextView().
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft).
-		SetText("[yellow]Tab/Shift+Tab: switch focus | Ctrl+R: run query | Esc: back to login | Ctrl+Q: quit")
-	return helpBar
-}
-
 func renderTreeView() *tview.TreeView {
 	RootTreeNode = tview.NewTreeNode("sqlite").
 		SetColor(tcell.ColorOlive)
@@ -101,7 +93,7 @@ func RefreshTree() {
 		return
 	}
 
-	RootTreeNode.SetText(filepath.Base(GetDbFile()))
+	RootTreeNode.SetText(tview.Escape(filepath.Base(GetDbFile())))
 	RootTreeNode.ClearChildren()
 
 	tables, err := DbClinet.ListTables()
@@ -112,13 +104,14 @@ func RefreshTree() {
 
 	for _, table := range tables {
 		tableName := table
-		node := tview.NewTreeNode(tableName).
+		node := tview.NewTreeNode(tview.Escape(tableName)).
 			SetReference(tableName).
 			SetSelectable(true)
 
 		node.SetSelectedFunc(func() {
 			// show table records in the result table
-			executeAndShow(fmt.Sprintf("select * from %q", tableName))
+			executeAndShow(fmt.Sprintf("select * from %s limit %d",
+				quoteIdentifier(tableName), FetchLimit))
 		})
 		RootTreeNode.AddChild(node)
 	}
@@ -136,7 +129,7 @@ func renderQueryWidget() *tview.Flex {
 		SetDirection(tview.FlexRow).
 		AddItem(QueryArea, 0, 2, false).
 		AddItem(textView, 0, 1, false)
-	queryWidget.SetBorder(true).SetTitle("[green]Query (Ctrl+R to run)")
+	queryWidget.SetBorder(true).SetTitle("[green]Query (Ctrl+R: run)")
 
 	return queryWidget
 }
@@ -189,19 +182,8 @@ func renderTable() *tview.Table {
 		SetBorders(true).
 		SetSeparator('|').
 		SetFixed(1, 0).
+		SetSelectable(true, false).
 		Select(0, 0)
-
-	table.SetDoneFunc(func(key tcell.Key) {
-		switch key {
-		case tcell.KeyEnter:
-			table.SetSelectable(true, true)
-		}
-	})
-
-	table.SetSelectedFunc(func(row int, column int) {
-		table.GetCell(row, column).SetTextColor(tcell.ColorRed)
-		table.SetSelectable(false, false)
-	})
 
 	table.SetBorder(true).SetTitle("[green]Result Table")
 
@@ -215,11 +197,16 @@ func ClearTableRecords() {
 
 func FillTableWithQueryResult(fields []string, records [][]string) {
 	TableRecords.Clear()
-	// 1. fill the first line with field names
+	// 1. fill the first line with field names (fixed, non-selectable header)
 	startRow := 0
-	if fields != nil {
+	if len(fields) > 0 {
 		for j, field := range fields {
-			setCell(startRow, j, field, tcell.ColorYellow)
+			cell := tview.NewTableCell(tview.Escape(field)).
+				SetTextColor(tcell.ColorYellow).
+				SetAttributes(tcell.AttrBold).
+				SetAlign(tview.AlignCenter).
+				SetSelectable(false)
+			TableRecords.SetCell(startRow, j, cell)
 		}
 		startRow += 1
 	}
@@ -230,10 +217,15 @@ func FillTableWithQueryResult(fields []string, records [][]string) {
 			setCell(startRow+i, j, cell, tcell.ColorWhite)
 		}
 	}
+
+	TableRecords.ScrollToBeginning()
+	if len(records) > 0 {
+		TableRecords.Select(startRow, 0)
+	}
 }
 
 func setCell(row int, column int, text string, color tcell.Color) {
-	cell := tview.NewTableCell(text).
+	cell := tview.NewTableCell(tview.Escape(text)).
 		SetTextColor(color).
 		SetAlign(tview.AlignCenter)
 	TableRecords.SetCell(row, column, cell)
@@ -253,5 +245,5 @@ func renderTextView() *tview.TextView {
 // PrintfTextView prints status / error messages to the dashboard text view.
 func PrintfTextView(format string, a ...any) {
 	textViewOut.Clear()
-	fmt.Fprintf(textViewOut, format, a...)
+	fmt.Fprintf(textViewOut, format, tuiapp.EscapeArgs(a)...)
 }

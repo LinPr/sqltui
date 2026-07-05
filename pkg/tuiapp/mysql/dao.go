@@ -10,12 +10,17 @@ import (
 
 const (
 	// DQL
-	SELECT = "select"
-	SHOW   = "show"
-	DESC   = "desc"
-	DESCRB = "describe"
+	SELECT  = "select"
+	SHOW    = "show"
+	DESC    = "desc"
+	DESCRB  = "describe"
+	WITH    = "with"
+	EXPLAIN = "explain"
 
 	// DDL & DML & DCL & TCL ....
+
+	// max rows fetched when browsing a table from the tree view
+	FetchLimit = 200
 )
 
 var (
@@ -24,25 +29,30 @@ var (
 
 type DB struct {
 	*sql.DB
-	dsn string
+	dsn    string
+	dbName string
 }
 
-func NewDB(dsn string) (*DB, error) {
-	if DbClinet != nil {
-		return DbClinet, nil
-	}
+func NewDB(dsn string, dbName string) (*DB, error) {
 	dbc, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := dbc.Ping(); err != nil {
+		dbc.Close()
 		return nil, err
 	}
 
+	// close the previous connection when re-connecting
+	if DbClinet != nil {
+		DbClinet.DB.Close()
+	}
+
 	DbClinet = &DB{
-		DB:  dbc,
-		dsn: dsn,
+		DB:     dbc,
+		dsn:    dsn,
+		dbName: dbName,
 	}
 	return DbClinet, nil
 }
@@ -52,10 +62,10 @@ func GetDB() *DB {
 }
 
 func GetDbName() string {
-	dbName := strings.Split(
-		strings.Split(DbClinet.dsn, "/")[1],
-		"?")[0]
-	return dbName
+	if DbClinet == nil {
+		return ""
+	}
+	return DbClinet.dbName
 }
 
 type RawCommandResult struct {
@@ -66,13 +76,13 @@ type RawCommandResult struct {
 }
 
 func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err error) {
-	cmd := strings.Split(strings.Trim(query, " "), " ")
-	if len(cmd) == 0 || cmd[0] == "" {
+	cmd := strings.Fields(strings.TrimSpace(query))
+	if len(cmd) == 0 {
 		return rawCmdResult, fmt.Errorf("empty query")
 	}
 
 	switch strings.ToLower(cmd[0]) {
-	case SELECT, SHOW, DESC, DESCRB:
+	case SELECT, SHOW, DESC, DESCRB, WITH, EXPLAIN:
 		rawCmdResult.IsDQL = true
 		rawCmdResult.Fields, rawCmdResult.Records, err = db.RawQuery(query)
 		return rawCmdResult, err
@@ -135,7 +145,7 @@ func (db *DB) ShowDatabases() ([]string, error) {
 func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
 	query := "show tables"
 	if database != "" {
-		query = fmt.Sprintf("show tables from `%s`", database)
+		query = "show tables from " + quoteIdent(database)
 	}
 
 	rows, err := db.Query(query)
@@ -160,7 +170,7 @@ func (db *DB) ShowCurrentDatabaseTables() ([]string, error) {
 }
 
 func (db *DB) FetchTableFields(table string) ([]string, error) {
-	query := fmt.Sprintf("describe %s", table)
+	query := fmt.Sprintf("describe %s", quoteIdent(table))
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -180,7 +190,7 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 }
 
 func (db *DB) FetchTableRecords(table string) ([][]string, error) {
-	query := fmt.Sprintf("select * from %s", table)
+	query := fmt.Sprintf("select * from %s limit %d", quoteIdent(table), FetchLimit)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -196,6 +206,12 @@ func (db *DB) FetchTableRecords(table string) ([][]string, error) {
 
 func (db *DB) Close() error {
 	return db.DB.Close()
+}
+
+// quoteIdent quotes a mysql identifier with backticks, doubling any
+// embedded backtick.
+func quoteIdent(name string) string {
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
 func readRecords(rows *sql.Rows) ([][]string, error) {

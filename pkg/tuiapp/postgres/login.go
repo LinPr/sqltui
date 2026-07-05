@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/LinPr/sqltui/pkg/config"
 	"github.com/LinPr/sqltui/pkg/tuiapp"
@@ -11,8 +10,10 @@ import (
 )
 
 func RenderLoginPage() *tview.Flex {
-	form := renderLoginForm()
+	// build the error text view first so that errors during form
+	// construction (e.g. a corrupt config file) are shown on screen
 	textView := renderLoginErrTextView()
+	form := renderLoginForm()
 
 	flex := tview.NewFlex().
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false).
@@ -28,8 +29,8 @@ func RenderLoginPage() *tview.Flex {
 func renderLoginForm() *tview.Form {
 	postgresConf, err := config.ReadPostgresConfig()
 	if err != nil {
-		log.Println("ReadPostgresConfig error: ", err)
 		postgresConf = &config.PostgresConfig{}
+		printfLoginErrOut("[red]ReadPostgresConfig error: %s", err)
 	}
 
 	form := tview.NewForm().
@@ -56,8 +57,7 @@ func renderLoginForm() *tview.Form {
 		switch event.Key() {
 		case tcell.KeyCtrlS:
 			SaveCallback(form)()
-		case tcell.KeyEnter:
-			ConnectCallback(form)()
+			return nil
 		}
 		return event
 	})
@@ -68,8 +68,11 @@ func renderLoginForm() *tview.Form {
 var LoginErrOut *tview.TextView
 
 func printfLoginErrOut(format string, a ...any) {
+	if LoginErrOut == nil {
+		return
+	}
 	LoginErrOut.Clear()
-	errMsg := fmt.Sprintf(format, a...)
+	errMsg := fmt.Sprintf(format, tuiapp.EscapeArgs(a)...)
 	LoginErrOut.SetText(errMsg)
 }
 
@@ -121,7 +124,7 @@ func ConnectCallback(form *tview.Form) func() {
 func SaveCallback(form *tview.Form) func() {
 	return func() {
 		if err := config.WritePostgresConfig(formPostgresConfig(form)); err != nil {
-			log.Println("WritePostgresConfig error: ", err)
+			printfLoginErrOut("[red]WritePostgresConfig error: %s", err)
 		}
 	}
 }

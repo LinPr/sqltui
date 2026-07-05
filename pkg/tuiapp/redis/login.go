@@ -14,8 +14,10 @@ import (
 
 func RenderLoginPage() *tview.Flex {
 
-	form := renderLoginForm()
+	// build the error text view first so that errors during form
+	// construction (e.g. a corrupt config file) are shown on screen
 	textView := renderLoginErrTextView()
+	form := renderLoginForm()
 
 	flex := tview.NewFlex().
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false).
@@ -24,10 +26,6 @@ func RenderLoginPage() *tview.Flex {
 			AddItem(form, 15, 3, true).
 			AddItem(textView, 0, 1, false), 50, 3, true).
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false)
-
-	flex.SetBorder(true)
-
-	tuiapp.RedisTui.AddPage("redis_login", form)
 
 	return flex
 }
@@ -39,7 +37,7 @@ func printfLoginErrOut(format string, a ...any) {
 		return
 	}
 	LoginErrOut.Clear()
-	erMsg := fmt.Sprintf(format, a...)
+	erMsg := fmt.Sprintf(format, tuiapp.EscapeArgs(a)...)
 	LoginErrOut.SetText(erMsg)
 }
 
@@ -67,16 +65,13 @@ func renderLoginForm() *tview.Form {
 		SetButtonBackgroundColor(tcell.ColorGray).
 		SetButtonTextColor(tcell.ColorLightGoldenrodYellow)
 
-	form.SetBorder(true).SetBorderColor(tcell.ColorWhite)
+	form.SetBorder(true).SetBorderColor(tcell.ColorWhite).SetTitle("[green]Redis Login")
 
 	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyCtrlS:
 			SaveCallback(form)()
-
-		case tcell.KeyEnter:
-			ConnectCallback(form)()
-
+			return nil
 		}
 		return event
 	})
@@ -102,7 +97,7 @@ func ConnectCallback(form *tview.Form) func() {
 		rdbNumStr := form.GetFormItem(4).(*tview.InputField).GetText()
 		rdbNum, err := strconv.Atoi(rdbNumStr)
 		if err != nil {
-			printfLoginErrOut("[red]%s", err.Error())
+			printfLoginErrOut("[red]Error: %s", err.Error())
 			return
 		}
 
@@ -115,7 +110,7 @@ func ConnectCallback(form *tview.Form) func() {
 			ReadTimeout:  2 * time.Second,
 		}) // must init database client here
 		if err != nil {
-			printfLoginErrOut("[red]%s", err.Error())
+			printfLoginErrOut("[red]Error: %s", err.Error())
 			return
 		}
 		_ = rdsc

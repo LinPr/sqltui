@@ -10,8 +10,10 @@ import (
 )
 
 func RenderLoginPage() *tview.Flex {
-	form := renderLoginForm()
+	// build the error text view first so that errors during form
+	// construction (e.g. a corrupt config file) are shown on screen
 	textView := renderLoginErrTextView()
+	form := renderLoginForm()
 
 	flex := tview.NewFlex().
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false).
@@ -21,22 +23,26 @@ func RenderLoginPage() *tview.Flex {
 			AddItem(textView, 0, 1, false), 50, 3, true).
 		AddItem(tview.NewBox().SetBorder(false).SetTitle(""), 0, 2, false)
 
-	flex.SetBorder(true)
-
 	return flex
 }
 
 var LoginErrOut *tview.TextView
 
 func printfLoginErrOut(format string, a ...any) {
+	if LoginErrOut == nil {
+		return
+	}
 	LoginErrOut.Clear()
-	erMsg := fmt.Sprintf(format, a...)
+	erMsg := fmt.Sprintf(format, tuiapp.EscapeArgs(a)...)
 	LoginErrOut.SetText(erMsg)
 }
 
 func renderLoginForm() *tview.Form {
 	filePath := ""
-	if sqliteConf, err := config.ReadSqliteConfig(); err == nil && sqliteConf != nil {
+	sqliteConf, err := config.ReadSqliteConfig()
+	if err != nil {
+		printfLoginErrOut("[red]ReadSqliteConfig error: %s", err)
+	} else if sqliteConf != nil {
 		filePath = sqliteConf.FilePath
 	}
 
@@ -57,9 +63,7 @@ func renderLoginForm() *tview.Form {
 		switch event.Key() {
 		case tcell.KeyCtrlS:
 			SaveCallback(form)()
-
-		case tcell.KeyEnter:
-			ConnectCallback(form)()
+			return nil
 		}
 		return event
 	})
@@ -82,7 +86,7 @@ func ConnectCallback(form *tview.Form) func() {
 
 		// must init database client here
 		if _, err := NewDB(filePath); err != nil {
-			printfLoginErrOut("[red]%s", err.Error())
+			printfLoginErrOut("[red]Error: %s", err.Error())
 			return
 		}
 
