@@ -1,32 +1,32 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
-	"github.com/LinPr/sqltui/pkg/tuiapp"
-	tuipostgres "github.com/LinPr/sqltui/pkg/tuiapp/postgres"
-	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
+
+	"github.com/LinPr/sqltui/internal/ui/dbmode"
 )
 
-// postgresCmd represents the postgres command
 var postgresCmd = &cobra.Command{
 	Use:     "postgres",
 	Aliases: []string{"pg", "postgresql"},
-	Short:   "start a postgresql tui",
-	Long:    "start a postgresql tui",
-	Run: func(cmd *cobra.Command, args []string) {
-		tuipostgres.Init()
+	Short:   "Connect to a PostgreSQL server",
+	Long: `Connect to a live PostgreSQL server.
 
-		layout := tview.NewFlex().
-			AddItem(tuiapp.PostgresTui.Pages, 0, 1, true)
+A connection form opens first, asking for host, port, user, password, database
+and ssl mode. It is prefilled from the saved config
+(~/.config/sqltui/config.yaml) and ctrl+s stores the values back for next time.
 
-		if err := tuiapp.PostgresTui.App.SetRoot(layout, true).
-			EnableMouse(true).
-			Run(); err != nil {
-			panic(err)
-		}
+After connecting, the schema browser lists schemas and tables: selecting a
+table loads its rows into a tab, and :query runs any SQL statement against the
+live connection (non-query statements report rows affected).`,
+	Example: `  # open the connection form, prefilled from the saved config
+  sqltui postgres
+
+  # "pg" and "postgresql" work too
+  sqltui pg`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return dbmode.Run(dbmode.KindPostgres)
 	},
 }
 

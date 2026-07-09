@@ -1,0 +1,4 @@
+level=info msg="hello world" count=2
+level=warn msg="a \"quoted\" word" extra=x debug
+
+level=error count=7

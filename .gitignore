@@ -1,2 +1,5 @@
 sqltui
 *.log
+run.sh
+DESIGN.md
+docs/

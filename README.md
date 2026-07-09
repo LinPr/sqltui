@@ -1,144 +1,206 @@
-![](./images/sqltui.png)
+# sqltui
 
-# SQLTUI - A terminal UI to operate sql and nosql databases
+A lightweight terminal UI for viewing and querying tabular data — data files
+and live databases — with SQL, fuzzy search, plotting and theming built in.
+Written in Go on top of Bubble Tea v2.
 
-sqltui provides a terminal UI to interact with your sql or nosql databases. The aim of this project is to make it easier to navigate, observe and manage your databases in the wild.
+![demo](./images/demo.gif)
 
-Supported databases:
+## Highlights
+
+- **Open anything tabular** — csv, tsv, dsv, json, jsonl, parquet, excel,
+  sqlite, fwf, logfmt, markdown, html; stdin (`-`) and http(s) URLs too
+- **SQL everywhere** — an embedded in-memory SQL engine over loaded files, or
+  live statements against MySQL / PostgreSQL / SQLite / Redis
+- **Tabs + frame stack** — every table is a tab; every operation (filter,
+  sort, query, search, cast) layers a new frame you can pop off with `q`
+- **Fuzzy & exact search** with live preview as you type — and every picker
+  (schema browser, columns, themes, redis keys) is type-to-filter
+- **Command palette** with fuzzy matching and inline shortcuts (`:f price > 3`)
+- **Context-aware SQL completion** — tables after `FROM`, columns after
+  `WHERE`, `alias.` resolution, functions, case-following
+- **Histogram & scatter plots** rendered right in the terminal
+- **Export** to csv, tsv, json, jsonl, parquet, markdown
+- **Copy & paste** — `y`/`Y` copy cell/row over OSC52 (works through SSH),
+  bracketed paste into any input, terminal text selection stays untouched
+- **40+ built-in themes** with live preview (default: `sorbet`, a warm
+  pastel scheme), on a transparent background that blends with your
+  terminal, plus `$EDITOR` round-trip editing
+
+## Screenshots
+
+| | |
+|:--:|:--:|
+| ![table](./images/table.png) <br> *Table view — stripes, gutter, status tags* | ![palette](./images/palette.png) <br> *Command palette (`:`)* |
+| ![query](./images/query.png) <br> *SQL editor with autocompletion* | ![themes](./images/themes.png) <br> *Theme selector with live preview* |
+| ![histogram](./images/histogram.png) <br> *Histogram (`:histogram`)* | ![scatter](./images/scatter.png) <br> *Scatter plot grouped by column* |
+
+## Install
+
+```sh
+go build -o sqltui .
+```
+
+Try it right away with the bundled sample data:
+
+```sh
+./sqltui examples/employees.csv examples/demo.db
+```
+
+## Usage
+
+### File mode
+
+```sh
+sqltui data.csv                     # open one file
+sqltui a.csv b.parquet c.xlsx       # multiple files -> multiple tabs
+sqltui database.db                  # every sqlite table becomes a tab
+cat data.csv | sqltui -             # stdin
+sqltui https://example.com/x.csv    # remote file
+sqltui data.txt -f csv              # override format detection
+sqltui --multiparts p1.csv p2.csv   # concatenate parts vertically
+```
+
+Parsing flags: `--separator`, `--quote-char`, `--no-header`,
+`--ignore-errors`, `--infer-schema no|fast|safe`, `--infer-types`,
+`--truncate-ragged-lines`, `--widths`, `--separator-length`,
+`--no-flexible-width`, `--sqlite-key`.
+
+### Database mode
+
+Database mode is for server databases that need connection credentials.
+SQLite databases are just files — open them directly in file mode
+(`sqltui app.db`), no subcommand needed.
 
 | Database   | Command           | Driver                                                     |
 | ---------- | ----------------- | ---------------------------------------------------------- |
 | MySQL      | `sqltui mysql`    | [go-sql-driver/mysql](https://github.com/go-sql-driver/mysql) |
 | PostgreSQL | `sqltui postgres` | [jackc/pgx](https://github.com/jackc/pgx)                   |
-| SQLite     | `sqltui sqlite`   | [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) (pure Go, no cgo) |
 | Redis      | `sqltui redis`    | [redis/go-redis](https://github.com/redis/go-redis)         |
 
-# Screenshots
-1. mysql login
-![](./images/1.png)
+A connection form opens first (prefilled from the config file): `enter`
+connects, `tab`/arrows move between fields, `ctrl+s` saves, `esc` quits.
+After connecting, the schema browser opens with the connected database
+expanded and the others collapsed (lazy-loaded on `enter`); type to filter
+tables. `enter` loads a table into a tab, and `:query` runs statements
+against the live connection.
 
-2. mysql tables tree
-![](./images/2.png)
+Database mode is organized as a stack of full-screen pages — connection
+form, schema browser, table — and `esc` always goes back one page: from a
+table it first pops applied frames, then returns to the schema browser;
+from the browser it returns to the connection form; from the form it exits.
+`q` in the browser jumps straight back to the open table instead.
 
-3. mysql show records
-![](./images/3.png)
+![db mode](./images/dbschema.png)
 
-4. mysql auto complete query
-![](./images/4.png)
+In Redis mode a key browser (grouped by type) replaces the schema browser —
+including in the `esc` chain above — and the query prompt executes raw
+commands with inline argument hints and completion for 230+ commands.
 
-5. mysql show error message
-![](./images/5.png)
+## Keybindings
 
-6. redis keys
-![](./images/6.png)
+| Key | Action |
+|---|---|
+| `k`/`↑`, `j`/`↓` | move up / down |
+| `h`/`←`, `l`/`→` | move column cursor (both column modes) |
+| `g`/`home`, `G`/`end` | first / last row |
+| `ctrl+u` / `ctrl+d` | half page up / down |
+| `pgup`/`ctrl+b`, `pgdown`/`ctrl+f` | page up / down |
+| `_` / `$` | first / last column |
+| `enter` | open row detail sheet |
+| `w` | toggle fit / wide column mode (auto-picked per table) |
+| `y` / `Y` | copy current cell / current row |
+| `i` | table info |
+| `R` | random row |
+| `1`-`9` | go to row |
+| `/` , `s` | fuzzy / exact search |
+| `:` | command palette |
+| `t` | tab switcher |
+| `H`/`shift+←`, `L`/`shift+→` | previous / next tab |
+| `q` | pop frame / close tab / back |
+| `esc` | back one level (never closes a tab or quits) |
+| `Q` | quit |
+| `F1` / `?` | help |
 
-7. redis result
-![](./images/7.png)
+In the sheet view: `j`/`k` (or `shift+j`/`shift+k`) scroll, `c` copies the
+row, `q`/`esc` return to the table.
 
-8. redis auto complete and command tip
-![](./images/8.png)
+## Commands
 
-# Install
-### 1. install with go
+Open the palette with `:` and type. Short aliases take the rest of the line
+as an argument (`:f age > 30` filters immediately).
 
-```shell
-go install github.com/LinPr/sqltui@latest
+| Command | Alias | Effect |
+|---|---|---|
+| `query` | `q` | full SQL editor with autocompletion |
+| `select` | `s` | inline column selection |
+| `filter` | `f` | inline WHERE clause |
+| `order` | `o`, `sort` | inline ORDER BY |
+| `search` / `fuzzysearch` | | exact / fuzzy search |
+| `schema` | | browse open tabs and live tables |
+| `info` | | table schema and stats |
+| `export` / `import` | | file export / import wizards |
+| `cast` | | change a column's type |
+| `register` | | name the current frame for SQL |
+| `histogram` / `scatterplot` | | terminal plots |
+| `edit` | | edit the table in `$EDITOR` |
+| `theme` | | theme selector with live preview |
+| `toggleborders` / `togglerownumbers` | | view toggles |
+| `reset` | | back to the base frame |
+| `reloadconfig` | | reload the config file |
+
+## SQL
+
+In file mode every loaded table is queryable by its tab name and the current
+frame is always available as `_`:
+
+```sql
+select department, count(*) as headcount, cast(avg(salary) as int) as avg_pay
+from employees group by department order by avg_pay desc
 ```
 
-### 2. build from source
+Full query results open in a new tab; inline `select`/`filter`/`order`
+results stack onto the current tab (pop with `q`).
 
-```shell
-git clone https://github.com/LinPr/sqltui.git
-cd sqltui
-go build -o sqltui .
+## Configuration
+
+`~/.config/sqltui/config.yaml` stores connection settings per engine plus UI
+preferences:
+
+```yaml
+mysql:
+  userName: root
+  password: "123456"
+  host: 127.0.0.1
+  port: "3306"
+  dbName: test_db
+ui:
+  theme: aurora
+  showBorders: true
+  showRowNumbers: true
 ```
 
-# Quick start
+A `config.json` left over from an older version is migrated to `config.yaml`
+automatically on first start (the JSON file is kept, but no longer used).
 
-### help
+Logs go to `~/.config/sqltui/sqltui.log`.
 
-``` shell
-$ sqltui -h
+## Tips
 
-sqltui is a tui tool to operate sql and nosql databases
-
-Usage:
-  sqltui [command]
-
-Available Commands:
-  completion  Generate the autocompletion script for the specified shell
-  help        Help about any command
-  mysql       start a mysql tui
-  postgres    start a postgresql tui
-  redis       start a redis tui
-  sqlite      start a sqlite tui
-
-Flags:
-  -h, --help   help for sqltui
-
-Use "sqltui [command] --help" for more information about a command.
-```
-
-### connect to a database
-
-```shell
-$ sqltui mysql      # MySQL
-$ sqltui postgres   # PostgreSQL (aliases: pg, postgresql)
-$ sqltui sqlite     # SQLite (opens a local database file)
-$ sqltui redis      # Redis
-```
-
-Each command opens a login page pre-filled from the config file. After a
-successful connection the login information is saved automatically.
-
-# Keybindings
-
-### Login page
-
-| Key    | Function                            |
-| :----- | ----------------------------------- |
-| Tab    | Move to the next form field         |
-| Ctrl+S | Save login information to file      |
-| Ctrl+C | Quit                                |
-
-### Dashboard (all databases)
-
-| Key           | Function                                  |
-| ------------- | ----------------------------------------- |
-| Tab           | Switch focus to the next widget           |
-| Shift+Tab     | Switch focus to the previous widget       |
-| Ctrl+R        | Run the query/command in the query area   |
-| Enter         | Select tree node / run query (mysql, redis) |
-| Esc           | Back to the login page                    |
-| Ctrl+Q        | Quit                                      |
-
-A one-line help bar at the bottom of every dashboard shows the available keys.
-
-# Configuration
-
-Connection settings are stored in `~/.config/sqltui/config.json` (created on
-first run, file mode `0600` since passwords are stored in plaintext). Each
-database section can also be edited by hand:
-
-```json
-{
-  "mysql":    { "userName": "root", "password": "...", "host": "127.0.0.1", "port": "3306", "dbName": "test_db" },
-  "redis":    { "userName": "", "password": "", "host": "127.0.0.1", "port": "6379", "rdbNum": "0" },
-  "sqlite":   { "filePath": "/home/you/.config/sqltui/sqlite.default" },
-  "postgres": { "userName": "postgres", "password": "", "host": "127.0.0.1", "port": "5432", "dbName": "postgres", "sslMode": "disable" }
-}
-```
-
-Logs are written to `~/.config/sqltui/sqltui.log` (truncated automatically
-when they grow beyond 1 MB).
-
-# TODO list
-1. query history and auto-completion for postgres/sqlite
-2. export query results (csv/json)
-3. support others...
-
-# References
-
-this project uses two main opensource projects
-- [cobra - for building command line interface](https://github.com/spf13/cobra)
-- [tview - for building terminal ui interface](https://github.com/rivo/tview)
+- The column cursor (`h`/`l`) works in both column modes: the header
+  highlights it, the status bar `col:` tag tracks it, `y` copies the cell
+  under it, and wide mode scrolls to keep it visible.
+- Every filter, sort, query or search layers a frame onto the tab's stack;
+  the breadcrumb in the status bar shows the chain. `q` pops one layer,
+  `esc` steps back too, and `:reset` jumps straight to the base table.
+- In SQL, `_` always means the current frame; `:register` gives a frame a
+  real name so you can join it against other tables.
+- `y`/`Y` and the sheet view's `c` copy via OSC52, so the clipboard works
+  over SSH. Bracketed paste works in every input, and the mouse is never
+  captured — plain terminal text selection keeps working.
+- Type to filter in every picker: schema browser, theme selector, column
+  pickers, tab switcher, redis keys.
+- `1`-`9` opens the go-to-row prompt with that digit prefilled, and `R`
+  jumps to a random row.
+- The theme selector previews live as you move the highlight — `enter`
+  keeps it, `esc` reverts to the previous theme.

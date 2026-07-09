@@ -1,0 +1,31 @@
+id,name,department,city,age,salary,hired,remote
+1,Alice Chen,Engineering,Shanghai,29,142000,2021-03-15,true
+2,Bob Martinez,Sales,Madrid,34,98000,2019-07-22,false
+3,Carol Wang,Engineering,Beijing,31,155000,2020-01-08,true
+4,David Kim,Design,Seoul,27,88000,2022-05-30,false
+5,Eva Novak,Marketing,Prague,38,76000,2018-11-12,true
+6,Frank Zhao,Engineering,Shenzhen,26,128000,2023-02-14,true
+7,Grace Liu,Sales,Singapore,42,115000,2017-09-03,false
+8,Henry Park,Ops,Busan,35,82000,2020-08-19,false
+9,Iris Tanaka,Design,Tokyo,30,95000,2021-06-25,true
+10,Jack Wilson,Engineering,London,45,187000,2015-04-01,false
+11,Karen Schmidt,Marketing,Berlin,33,71000,2019-12-09,true
+12,Leo Rossi,Sales,Milan,28,89000,2022-10-17,false
+13,Mia Johnson,Engineering,Austin,24,118000,2023-08-21,true
+14,Noah Brown,Ops,Denver,39,79000,2018-03-27,false
+15,Olivia Davis,Design,Portland,32,102000,2020-11-05,true
+16,Peter Kumar,Engineering,Bangalore,36,134000,2019-05-14,true
+17,Quinn Taylor,Marketing,Dublin,25,64000,2023-01-30,false
+18,Rita Fernandez,Sales,Barcelona,41,121000,2016-08-08,false
+19,Sam Nguyen,Engineering,Hanoi,28,112000,2021-09-16,true
+20,Tina Petrov,Ops,Sofia,37,68000,2019-02-11,true
+21,Uma Patel,Design,Mumbai,29,91000,2021-12-01,false
+22,Victor Hugo,Engineering,Paris,48,196000,2014-06-23,false
+23,Wendy Zhang,Sales,Hangzhou,31,105000,2020-04-18,true
+24,Xavier Lopez,Marketing,Mexico City,26,59000,2023-06-12,false
+25,Yuki Sato,Engineering,Osaka,33,148000,2018-10-29,true
+26,Zoe Adams,Design,Vancouver,27,86000,2022-03-08,true
+27,Aaron Miller,Ops,Chicago,44,94000,2016-01-19,false
+28,Bella Costa,Sales,Lisbon,30,97000,2021-07-07,true
+29,Chris Evans,Engineering,Boston,52,210000,2012-09-15,false
+30,Dana White,Marketing,Sydney,35,83000,2019-08-26,true

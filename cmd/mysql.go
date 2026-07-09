@@ -1,27 +1,28 @@
 package cmd
 
 import (
-	"github.com/LinPr/sqltui/pkg/tuiapp"
-	tuimysql "github.com/LinPr/sqltui/pkg/tuiapp/mysql"
-	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
+
+	"github.com/LinPr/sqltui/internal/ui/dbmode"
 )
 
 var mysqlCmd = &cobra.Command{
 	Use:   "mysql",
-	Short: "start a mysql tui",
-	Long:  "start a mysql tui",
-	Run: func(cmd *cobra.Command, args []string) {
-		tuimysql.Init()
+	Short: "Connect to a MySQL server",
+	Long: `Connect to a live MySQL server.
 
-		layout := tview.NewFlex().
-			AddItem(tuiapp.MysqlTui.Pages, 0, 1, true)
+A connection form opens first, asking for host, port, user, password and
+database. It is prefilled from the saved config (~/.config/sqltui/config.yaml)
+and ctrl+s stores the values back for next time.
 
-		if err := tuiapp.MysqlTui.App.SetRoot(layout, true).
-			EnableMouse(true).
-			Run(); err != nil {
-			panic(err)
-		}
+After connecting, the schema browser lists the server's databases and tables:
+selecting a table loads its rows into a tab, and :query runs any SQL statement
+against the live connection (non-query statements report rows affected).`,
+	Example: `  # open the connection form, prefilled from the saved config
+  sqltui mysql`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return dbmode.Run(dbmode.KindMysql)
 	},
 }
 

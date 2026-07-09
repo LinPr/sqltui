@@ -1,0 +1,4 @@
+[
+  {"id": 1, "name": "alice", "ok": true, "score": 3.5, "note": null},
+  {"name": "bob", "id": 2, "tags": ["x", "y"], "meta": {"a": 1}, "score": 4.0}
+]

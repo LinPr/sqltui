@@ -1,28 +1,28 @@
 package cmd
 
 import (
-	"github.com/LinPr/sqltui/pkg/tuiapp"
-	tuiredis "github.com/LinPr/sqltui/pkg/tuiapp/redis"
-	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
+
+	"github.com/LinPr/sqltui/internal/ui/dbmode"
 )
 
-// redisCmd represents the redis command
 var redisCmd = &cobra.Command{
 	Use:   "redis",
-	Short: "start a redis tui",
-	Long:  "start a redis tui",
-	Run: func(cmd *cobra.Command, args []string) {
-		tuiredis.Init()
+	Short: "Connect to a Redis server",
+	Long: `Connect to a live Redis server.
 
-		layout := tview.NewFlex().
-			AddItem(tuiapp.RedisTui.Pages, 0, 1, true)
+A connection form opens first, asking for host, port, user, password and
+database number. It is prefilled from the saved config
+(~/.config/sqltui/config.yaml) and ctrl+s stores the values back for next time.
 
-		if err := tuiapp.RedisTui.App.SetRoot(layout, true).
-			EnableMouse(true).
-			Run(); err != nil {
-			panic(err)
-		}
+After connecting, a key browser groups keys by type: selecting a key shows its
+rendered value, and :query executes raw Redis commands (with inline argument
+hints and completion), showing results as pretty JSON.`,
+	Example: `  # open the connection form, prefilled from the saved config
+  sqltui redis`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return dbmode.Run(dbmode.KindRedis)
 	},
 }
 
