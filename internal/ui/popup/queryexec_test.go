@@ -28,6 +28,8 @@ type qxCtx struct {
 
 func (c *qxCtx) CurrentFrame() *data.Frame { return nil }
 func (c *qxCtx) CurrentRow() int           { return 0 }
+func (c *qxCtx) SheetFieldCursor() int     { return 0 }
+func (c *qxCtx) CurrentTableNamespace() string { return "" }
 func (c *qxCtx) BaseCrumb() string         { return c.base }
 func (c *qxCtx) Crumbs() []string          { return nil }
 func (c *qxCtx) ColumnNames() []string     { return c.cols }
@@ -42,6 +44,8 @@ func (c *qxCtx) ShowRowNumbers() bool      { return false }
 func (c *qxCtx) Tabs() []ui.TabInfo        { return nil }
 func (c *qxCtx) ActiveTab() int            { return 0 }
 func (c *qxCtx) ActivePaneID() int         { return 0 }
+func (c *qxCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c *qxCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 type qxFakeBackend struct {
 	last string
@@ -60,7 +64,8 @@ func (b *qxFakeBackend) Tables(string) ([]string, error) { return nil, nil }
 func (b *qxFakeBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, nil
 }
-func (b *qxFakeBackend) Close() error { return nil }
+func (b *qxFakeBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
+func (b *qxFakeBackend) Close() error                                  { return nil }
 
 // qxTestFrame builds a two-column frame: name (str) and age (i64).
 func qxTestFrame() *data.Frame {

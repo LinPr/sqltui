@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/theme"
 )
@@ -310,5 +312,159 @@ func TestPadCellSanitizesCarriageReturns(t *testing.T) {
 	}
 	if !strings.Contains(got, "line1␤line2␤x") {
 		t.Fatalf("padCell = %q, want CR/LF shown as ␤", got)
+	}
+}
+
+func TestToggleSelectAndIsSelected(t *testing.T) {
+	tv := &TableView{}
+	if tv.IsSelected(0) {
+		t.Fatal("fresh view reports a selected row")
+	}
+	tv.ToggleSelect(3)
+	if !tv.IsSelected(3) {
+		t.Fatal("ToggleSelect(3) did not mark row 3 selected")
+	}
+	// Toggling again removes the row (dedup).
+	tv.ToggleSelect(3)
+	if tv.IsSelected(3) {
+		t.Fatal("second ToggleSelect(3) did not clear the row")
+	}
+	// Multiple distinct rows coexist.
+	tv.ToggleSelect(1)
+	tv.ToggleSelect(5)
+	if !tv.IsSelected(1) || !tv.IsSelected(5) {
+		t.Fatal("independent rows not tracked after re-toggle")
+	}
+}
+
+func TestSelectedRowsSorted(t *testing.T) {
+	tv := &TableView{}
+	tv.ToggleSelect(7)
+	tv.ToggleSelect(2)
+	tv.ToggleSelect(5)
+	want := []int{2, 5, 7}
+	if got := tv.SelectedRows(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("SelectedRows = %v, want %v", got, want)
+	}
+	// Returned slice is a copy: mutating it must not affect the view.
+	got := tv.SelectedRows()
+	got[0] = 999
+	if tv.IsSelected(999) {
+		t.Fatal("SelectedRows returned an alias, not a copy")
+	}
+}
+
+func TestSelectedRowsEmptyWhenNone(t *testing.T) {
+	tv := &TableView{}
+	if got := tv.SelectedRows(); got != nil {
+		t.Fatalf("SelectedRows on untouched view = %v, want nil", got)
+	}
+	// After clearing, SelectedRows is nil again.
+	tv.ToggleSelect(0)
+	tv.ClearSelect()
+	if got := tv.SelectedRows(); got != nil {
+		t.Fatalf("SelectedRows after ClearSelect = %v, want nil", got)
+	}
+}
+
+func TestClearSelectEmptiesSet(t *testing.T) {
+	tv := &TableView{}
+	tv.ToggleSelect(1)
+	tv.ToggleSelect(2)
+	tv.ClearSelect()
+	if tv.IsSelected(1) || tv.IsSelected(2) {
+		t.Fatal("ClearSelect did not empty the set")
+	}
+	if got := tv.SelectedRows(); len(got) != 0 {
+		t.Fatalf("SelectedRows after ClearSelect = %v, want empty", got)
+	}
+}
+
+func TestResetClearsSelect(t *testing.T) {
+	tv := &TableView{}
+	tv.ToggleSelect(1)
+	tv.Reset()
+	if tv.IsSelected(1) {
+		t.Fatal("Reset did not clear the multi-select set")
+	}
+}
+
+func TestClampToClearsSelect(t *testing.T) {
+	tv := &TableView{}
+	tv.ToggleSelect(1)
+	tv.ClampTo(testFrame(3))
+	if tv.IsSelected(1) {
+		t.Fatal("ClampTo did not clear the multi-select set")
+	}
+	// ClampTo(nil) routes through Reset, which also clears.
+	tv.ToggleSelect(0)
+	tv.ClampTo(nil)
+	if tv.IsSelected(0) {
+		t.Fatal("ClampTo(nil) did not clear the multi-select set")
+	}
+}
+
+func TestRenderSelectedRowShowsMarkerInGutter(t *testing.T) {
+	f := testFrame(5)
+	th := theme.Default()
+	o := RenderOpts{Width: 40, Height: 12, Theme: th, ShowRowNumbers: true}
+
+	tv := &TableView{}
+	out := tv.Render(f, o)
+	if strings.Contains(out, selectMarker) {
+		t.Fatalf("no rows selected, but marker present:\n%s", out)
+	}
+
+	tv.ToggleSelect(0)
+	out = tv.Render(f, o)
+	lines := strings.Split(out, "\n")
+	// Row 0 is the first body row, which sits right under the header (and
+	// below a border line when borders are on).
+	body0 := lines[1]
+	if !strings.ContainsRune(body0, []rune(selectMarker)[0]) {
+		t.Fatalf("selected row 0 missing marker in:\n%s", out)
+	}
+	// Row 1 is not selected: its body line must not carry the marker.
+	body1 := lines[2]
+	if strings.ContainsRune(body1, []rune(selectMarker)[0]) {
+		t.Fatalf("non-selected row 1 unexpectedly carries marker in:\n%s", out)
+	}
+}
+
+func TestRenderSelectedRowShowsTagWithoutGutter(t *testing.T) {
+	f := testFrame(5)
+	th := theme.Default()
+	o := RenderOpts{Width: 40, Height: 12, Theme: th} // no gutter
+
+	tv := &TableView{}
+	tv.ToggleSelect(0)
+	out := tv.Render(f, o)
+	if !strings.Contains(out, selectMarker) {
+		t.Fatalf("selected row missing marker tag without gutter:\n%s", out)
+	}
+	// Width of each body line must still equal the inner width so column
+	// alignment is preserved.
+	for i, ln := range strings.Split(out, "\n") {
+		if w := ansi.StringWidth(ln); w != o.Width {
+			t.Fatalf("line %d width = %d, want %d (alignment broken):\n%s", i, w, o.Width, out)
+		}
+	}
+}
+
+func TestRenderCursorKeepsMarkerWhenSelected(t *testing.T) {
+	f := testFrame(5)
+	th := theme.Default()
+	o := RenderOpts{Width: 40, Height: 12, Theme: th, ShowRowNumbers: true}
+
+	tv := &TableView{}
+	tv.JumpTo(2, f.NumRows())
+	tv.ToggleSelect(2)
+	out := tv.Render(f, o)
+
+	// The cursor row (row 2, i.e. "3" in the gutter) must carry both the
+	// marker and remain on screen.
+	body2 := strings.Split(out, "\n")[3]
+	if !strings.ContainsRune(body2, []rune(selectMarker)[0]) {
+		t.Fatalf("cursor+selected row 2 missing marker:\n%s", out)
 	}
 }

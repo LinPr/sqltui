@@ -204,6 +204,24 @@ func (db *DB) FetchTableRecords(table string) ([][]string, error) {
 	return readRecords(rows)
 }
 
+// ListPrimaryKeys lists the primary-key column names of table, in pk-ordinal
+// order. Empty when the table has no primary key. The namespace argument is
+// ignored: sqlite files have no schema level.
+func (db *DB) ListPrimaryKeys(table string) ([]string, error) {
+	query := fmt.Sprintf("SELECT name FROM pragma_table_info(%s) WHERE pk > 0 ORDER BY pk", quoteString(table))
+	_, records, err := db.RawQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	pks := make([]string, 0, len(records))
+	for _, record := range records {
+		if len(record) > 0 {
+			pks = append(pks, record[0])
+		}
+	}
+	return pks, nil
+}
+
 func (db *DB) Close() error {
 	return db.DB.Close()
 }
@@ -212,6 +230,12 @@ func (db *DB) Close() error {
 // any embedded double quote.
 func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// quoteString wraps name in a single-quoted SQL string literal, doubling any
+// embedded single quote. Used for the table argument of pragma_table_info.
+func quoteString(name string) string {
+	return "'" + strings.ReplaceAll(name, "'", "''") + "'"
 }
 
 func readRecords(rows *sql.Rows) ([][]string, error) {

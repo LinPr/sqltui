@@ -128,3 +128,40 @@ func TestRawSqlCommandReturningIsDQL(t *testing.T) {
 		t.Fatalf("DELETE ... RETURNING: IsDQL=%v records=%v", res.IsDQL, res.Records)
 	}
 }
+
+func TestListPrimaryKeys(t *testing.T) {
+	db := newTestDB(t)
+
+	// users.id is declared INTEGER PRIMARY KEY in newTestDB.
+	pks, err := db.ListPrimaryKeys("users")
+	if err != nil {
+		t.Fatalf("ListPrimaryKeys(users): %v", err)
+	}
+	if len(pks) != 1 || pks[0] != "id" {
+		t.Fatalf("expected [id], got %v", pks)
+	}
+
+	// A table without a primary key yields an empty list.
+	if _, err := db.RawExec(`CREATE TABLE logs (msg TEXT)`); err != nil {
+		t.Fatalf("create logs: %v", err)
+	}
+	pks, err = db.ListPrimaryKeys("logs")
+	if err != nil {
+		t.Fatalf("ListPrimaryKeys(logs): %v", err)
+	}
+	if len(pks) != 0 {
+		t.Fatalf("expected no primary keys for logs, got %v", pks)
+	}
+
+	// A composite primary key comes back in pk-ordinal order.
+	if _, err := db.RawExec(`CREATE TABLE kv (k TEXT, v TEXT, PRIMARY KEY (k, v))`); err != nil {
+		t.Fatalf("create kv: %v", err)
+	}
+	pks, err = db.ListPrimaryKeys("kv")
+	if err != nil {
+		t.Fatalf("ListPrimaryKeys(kv): %v", err)
+	}
+	if len(pks) != 2 || pks[0] != "k" || pks[1] != "v" {
+		t.Fatalf("expected [k v], got %v", pks)
+	}
+}

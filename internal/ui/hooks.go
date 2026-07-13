@@ -19,6 +19,8 @@ type TabInfo struct {
 type AppContext interface {
 	CurrentFrame() *data.Frame // top of current pane stack (nil if no tabs)
 	CurrentRow() int           // selected row in current table view
+	SheetFieldCursor() int     // selected field in sheet mode
+	CurrentTableNamespace() string
 	BaseCrumb() string         // current tab title
 	Crumbs() []string          // full breadcrumb chain
 	ColumnNames() []string
@@ -33,6 +35,8 @@ type AppContext interface {
 	Tabs() []TabInfo
 	ActiveTab() int
 	ActivePaneID() int // stable identity of the active pane (0 if no tabs)
+	PendingEdit() *PendingEdit
+	PendingDelete() *PendingDelete
 }
 
 // Factories maps command names to overlay constructors. Popup packages

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LinPr/sqltui/internal/config"
 	"github.com/LinPr/sqltui/internal/data"
@@ -52,6 +53,13 @@ type App struct {
 	engine  *query.Engine
 	backend db.Backend
 	kv      db.KVBackend
+
+	// pendingEdit/pendingDelete hold an in-flight cell edit / row delete that
+	// a confirm popup is about to commit. They are set by the dispatch cases
+	// (ActEdit for Agent E, ActDelete here) and cleared by the commit/cancel
+	// built-ins (saveedit/canceledit/deleterows/canceldelete).
+	pendingEdit   *PendingEdit
+	pendingDelete *PendingDelete
 
 	// syncedFrame caches the frame last registered as "_" (see ensureSynced).
 	syncedFrame *data.Frame
@@ -140,6 +148,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ApplyFrameMsg:
 		return a, a.applyFrame(m)
 
+	case ReplaceBaseMsg:
+		return a, a.replaceBase(m)
+
 	case RunCommandMsg:
 		return a, a.runCommand(m.Name, m.Arg)
 
@@ -212,6 +223,35 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case cellSavedMsg:
+		// An async UPDATE finished. On success toast and refresh the table so
+		// the edit is visible; on error surface the error overlay.
+		if m.err != nil {
+			a.overlays = append(a.overlays, errBox{err: m.err})
+			return a, nil
+		}
+		cmds := []tea.Cmd{a.setToast(fmt.Sprintf("updated %d row(s)", m.rows))}
+		if a.backend != nil {
+			cmds = append(cmds, a.runCommand("refreshtable", ""))
+		}
+		return a, tea.Batch(cmds...)
+
+	case rowsDeletedMsg:
+		// An async DELETE finished. On success toast, refresh the table and
+		// clear the multi-select set; on error surface the error overlay.
+		if m.err != nil {
+			a.overlays = append(a.overlays, errBox{err: m.err})
+			return a, nil
+		}
+		if p := a.pane(); p != nil {
+			p.Table.ClearSelect()
+		}
+		cmds := []tea.Cmd{a.setToast(fmt.Sprintf("deleted %d row(s)", m.rows))}
+		if a.backend != nil {
+			cmds = append(cmds, a.runCommand("refreshtable", ""))
+		}
+		return a, tea.Batch(cmds...)
+
 	case tea.KeyPressMsg:
 		return a.handleKey(m)
 
@@ -280,7 +320,8 @@ func (a *App) renderBody(w, h int) string {
 	}
 
 	if p.Mode == ModeSheet && frame != nil && frame.NumRows() > 0 {
-		return renderSheet(frame, p.Table.Sel(), p.SheetOff, w, h, a.th)
+		return renderSheet(frame, p.Table.Sel(), p.SheetOff, w, h, p.SheetField,
+			p.SheetEditing, p.SheetEdit, p.SheetEditCur, p.SheetValOff, a.th)
 	}
 
 	return p.Table.Render(frame, RenderOpts{
@@ -348,9 +389,105 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	p := a.pane()
 	if p != nil && p.Mode == ModeSheet {
+		// While inline-editing a sheet field, keys go to the edit handler
+		// before the normal SheetBindings dispatch: j/k and other nav keys
+		// must not move the cursor mid-edit.
+		if p.SheetEditing {
+			return a.handleSheetEditKey(msg)
+		}
 		return a, a.dispatch(actionFor(key, SheetBindings, GlobalBindings), key)
 	}
 	return a, a.dispatch(actionFor(key, TableBindings, GlobalBindings), key)
+}
+
+// handleSheetEditKey routes keys while a sheet field is being inline-edited.
+// esc/ctrl+c cancel (keeping the original value); ctrl+s commits via the
+// "confirmsave" command; printable runes insert at the cursor; backspace
+// deletes before the cursor; left/right/home/end/ctrl+a/ctrl+e move the
+// cursor; ctrl+u clears the buffer. After each mutation the right-pane
+// value scroll is re-clamped. Any other key is swallowed so the field does
+// not move.
+func (a *App) handleSheetEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	p := a.pane()
+	if p == nil {
+		return a, nil
+	}
+	f := p.Current()
+	if f == nil {
+		return a, nil
+	}
+	key := msg.String()
+	switch key {
+	case "esc", "ctrl+c":
+		p.SheetEditing = false
+		p.SheetEdit = nil
+		p.SheetEditCur = 0
+		return a, nil
+	case "ctrl+s":
+		if p.SheetField < 0 || p.SheetField >= f.NumCols() {
+			return a, nil
+		}
+		a.pendingEdit = &PendingEdit{
+			Frame:     f,
+			Row:       p.Table.Sel(),
+			Col:       p.SheetField,
+			ColName:   f.Columns[p.SheetField].Name,
+			OldValue:  f.CellString(p.Table.Sel(), p.SheetField),
+			NewValue:  string(p.SheetEdit),
+			Table:     a.BaseCrumb(),
+			Namespace: a.CurrentTableNamespace(),
+		}
+		return a, a.runCommand("confirmsave", "")
+	case "backspace", "ctrl+h":
+		if p.SheetEditCur > 0 {
+			p.SheetEdit = append(p.SheetEdit[:p.SheetEditCur-1], p.SheetEdit[p.SheetEditCur:]...)
+			p.SheetEditCur--
+		}
+	case "delete":
+		if p.SheetEditCur < len(p.SheetEdit) {
+			p.SheetEdit = append(p.SheetEdit[:p.SheetEditCur], p.SheetEdit[p.SheetEditCur+1:]...)
+		}
+	case "left":
+		if p.SheetEditCur > 0 {
+			p.SheetEditCur--
+		}
+	case "right":
+		if p.SheetEditCur < len(p.SheetEdit) {
+			p.SheetEditCur++
+		}
+	case "home", "ctrl+a":
+		p.SheetEditCur = 0
+	case "end", "ctrl+e":
+		p.SheetEditCur = len(p.SheetEdit)
+	case "ctrl+u":
+		p.SheetEdit = p.SheetEdit[p.SheetEditCur:]
+		p.SheetEditCur = 0
+	default:
+		// Printable rune insert at the cursor. Modifier combos (ctrl+x) are
+		// ignored so they never land as literal text.
+		if t := msg.Key().Text; t != "" && msg.Mod == 0 {
+			r := []rune(t)
+			p.SheetEdit = append(p.SheetEdit[:p.SheetEditCur], append(r, p.SheetEdit[p.SheetEditCur:]...)...)
+			p.SheetEditCur += len(r)
+		}
+	}
+	// Re-clamp the right-pane value scroll to the edit buffer length.
+	_, valW := sheetTableGeometry(f, a.width)
+	visible := max(1, max(1, a.height-1)-2)
+	count := sheetValueLineCount(f, p.Table.Sel(), p.SheetField, valW)
+	if editing := len(p.SheetEdit); editing > 0 {
+		count = strings.Count(ansi.Wrap(string(p.SheetEdit), valW, ""), "\n") + 1
+	}
+	maxOff := max(0, count-visible)
+	// Keep the cursor line in view while typing.
+	curLine, _ := sheetEditLineOf(p.SheetEdit, p.SheetEditCur, valW)
+	if curLine < p.SheetValOff {
+		p.SheetValOff = curLine
+	} else if curLine >= p.SheetValOff+visible {
+		p.SheetValOff = curLine - visible + 1
+	}
+	p.SheetValOff = clamp(p.SheetValOff, 0, maxOff)
+	return a, nil
 }
 
 func (a *App) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -453,22 +590,89 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 		p.Table.LastCol(ncols)
 	case ActExpand:
 		p.Table.ToggleExpanded()
+	case ActEdit:
+		// Toggle inline edit on the cursored sheet field. Only meaningful in
+		// sheet mode; in table mode e is unbound. While already editing, e is
+		// a no-op (esc cancels, ctrl+s commits).
+		if p.Mode != ModeSheet || f == nil || nrows == 0 || ncols == 0 {
+			return nil
+		}
+		if p.SheetEditing {
+			return nil
+		}
+		val := f.CellString(p.Table.Sel(), p.SheetField)
+		p.SheetEdit = []rune(val)
+		p.SheetEditCur = len(p.SheetEdit)
+		p.SheetEditing = true
+		p.SheetValOff = 0
+		return nil
+	case ActRefresh:
+		if a.backend != nil {
+			return a.runCommand("refreshtable", "")
+		}
+		if a.kv != nil {
+			return a.setToast("use r in the key browser to rescan")
+		}
+		return a.setToast("use :import to reload") // file mode fallback
+	case ActToggleSelect:
+		if p != nil && f != nil && nrows > 0 {
+			p.Table.ToggleSelect(p.Table.Sel())
+		}
+		return nil
+	case ActDelete:
+		return a.startDelete()
 
 	// mode switches
 	case ActSheet:
 		if nrows > 0 {
 			p.Mode = ModeSheet
 			p.SheetOff = 0
+			p.SheetField = 0
+			p.SheetValOff = 0
+			p.SheetEditing = false
+			p.SheetEdit = nil
+			p.SheetEditCur = 0
 		}
 	case ActBack:
 		p.Mode = ModeTable
 	case ActSheetDown, ActSheetUp:
+		if ncols == 0 {
+			return nil
+		}
 		delta := 1
 		if action == ActSheetUp {
 			delta = -1
 		}
-		maxOff := max(0, sheetLineCount(f, p.Table.Sel(), a.width)-(a.height-2))
-		p.SheetOff = clamp(p.SheetOff+delta, 0, maxOff)
+		p.SheetField = clamp(p.SheetField+delta, 0, ncols-1)
+		// A new field shows its value from the top, and cancels any in-flight
+		// inline edit (the edit buffer belongs to the previous field).
+		p.SheetValOff = 0
+		if p.SheetEditing {
+			p.SheetEditing = false
+			p.SheetEdit = nil
+			p.SheetEditCur = 0
+		}
+		// Edge-follow the LEFT key list only. visible mirrors renderSheet:
+		// bodyH = max(1, height-1) (one line for the status bar), then two
+		// more for the "row N of M" head and the Key|Value column header.
+		keyW, _ := sheetTableGeometry(f, a.width)
+		bodyH := max(1, a.height-1)
+		visible := bodyH - 2
+		if visible < 1 {
+			visible = 1
+		}
+		maxOff := max(0, sheetKeyLineCount(f, keyW)-visible)
+		curStart := sheetKeyLineOffset(f, p.SheetField, keyW)
+		curEnd := curStart + sheetKeyEntryHeight(f, p.SheetField, keyW) - 1
+		if curStart < p.SheetOff {
+			p.SheetOff = curStart
+		} else if curEnd >= p.SheetOff+visible {
+			p.SheetOff = curEnd - visible + 1
+			if p.SheetOff > curStart {
+				p.SheetOff = curStart
+			}
+		}
+		p.SheetOff = clamp(p.SheetOff, 0, maxOff)
 	case ActCopy:
 		text := rowClipboardText(f, p.Table.Sel())
 		return tea.Batch(tea.SetClipboard(text), a.setToast("copied to clipboard"))
@@ -524,6 +728,47 @@ func (a *App) pop() tea.Cmd {
 		return nil
 	}
 	return a.closeTab(a.active)
+}
+
+// startDelete gathers the rows to delete (the multi-select set, or the cursor
+// row when nothing is selected) and hands off to the confirm-delete popup. In
+// database mode it first resolves the table's primary keys: a table without a
+// primary key cannot be safely deleted and is rejected with a toast. File mode
+// always has an implicit identity (row index) so it skips the PK check.
+func (a *App) startDelete() tea.Cmd {
+	p := a.pane()
+	if p == nil {
+		return nil
+	}
+	f := p.Current()
+	if f == nil {
+		return nil
+	}
+	nrows := f.NumRows()
+	if nrows == 0 {
+		return nil
+	}
+	rows := p.Table.SelectedRows()
+	if len(rows) == 0 {
+		rows = []int{clamp(p.Table.Sel(), 0, nrows-1)}
+	}
+	if a.backend != nil {
+		table := a.BaseCrumb()
+		ns := a.CurrentTableNamespace()
+		pks, err := a.backend.PrimaryKeys(ns, table)
+		if err != nil {
+			e := err
+			return func() tea.Msg { return ErrorMsg{Err: e} }
+		}
+		if len(pks) == 0 {
+			return a.setToast("no primary key, cannot delete")
+		}
+		a.pendingDelete = &PendingDelete{Frame: f, Rows: rows, Table: table, Namespace: ns}
+		return a.runCommand("confirmdelete", "")
+	}
+	// file mode
+	a.pendingDelete = &PendingDelete{Frame: f, Rows: rows}
+	return a.runCommand("confirmdelete", "")
 }
 
 // escBack implements esc's "go back one level" in table mode. Unlike pop it
@@ -592,6 +837,38 @@ func (a *App) runCommand(name, arg string) tea.Cmd {
 		a.showBorders = uc.ShowBorders
 		a.showRowNumbers = uc.ShowRowNumbers
 		return a.setToast("config reloaded")
+	case "saveedit":
+		if a.pendingEdit == nil {
+			return nil
+		}
+		pe := *a.pendingEdit
+		a.pendingEdit = nil
+		if p := a.pane(); p != nil {
+			p.SheetEditing = false
+		}
+		return commitCellEdit(a, pe)
+	case "canceledit":
+		a.pendingEdit = nil
+		if p := a.pane(); p != nil {
+			p.SheetEditing = false
+		}
+		return a.setToast("edit canceled")
+	case "deleterows":
+		if a.pendingDelete == nil {
+			return nil
+		}
+		pd := *a.pendingDelete
+		a.pendingDelete = nil
+		if p := a.pane(); p != nil {
+			p.Table.ClearSelect()
+		}
+		return commitRowDelete(a, pd)
+	case "canceldelete":
+		a.pendingDelete = nil
+		if p := a.pane(); p != nil {
+			p.Table.ClearSelect()
+		}
+		return nil
 	}
 
 	factory, ok := Factories[name]
@@ -677,6 +954,23 @@ func (a *App) applyFrame(m ApplyFrameMsg) tea.Cmd {
 		}
 		target.Push(m.Frame, crumb)
 	}
+	return nil
+}
+
+// replaceBase handles ReplaceBaseMsg: swap the base frame of the target pane
+// (used by the refresh command to reload the current table in place).
+func (a *App) replaceBase(m ReplaceBaseMsg) tea.Cmd {
+	var target *Pane
+	if m.PaneID != 0 {
+		target = a.paneByID(m.PaneID)
+	}
+	if target == nil {
+		target = a.pane()
+	}
+	if target == nil || m.Frame == nil {
+		return nil
+	}
+	target.ReplaceBase(m.Frame)
 	return nil
 }
 
@@ -788,6 +1082,40 @@ func (a *App) CurrentRow() int {
 	return 0
 }
 
+// SheetFieldCursor reports the selected field index in sheet mode. It is
+// always a valid column index for the current frame, or 0 when no pane is
+// open.
+func (a *App) SheetFieldCursor() int {
+	if p := a.pane(); p != nil {
+		return p.SheetField
+	}
+	return 0
+}
+
+// CurrentTableNamespace reports the namespace the active table was loaded
+// from, so the refresh command can re-fetch the same table. It consults the
+// completion cache's table-to-namespace map first, then falls back to the
+// backend's connected namespace (when the backend exposes one), and finally
+// returns "" (the backend then treats it as the default namespace).
+func (a *App) CurrentTableNamespace() string {
+	if a.backend == nil {
+		return ""
+	}
+	if p := a.pane(); p != nil {
+		c := a.completionCache()
+		c.mu.Lock()
+		ns := c.ns[p.Title]
+		c.mu.Unlock()
+		if ns != "" {
+			return ns
+		}
+	}
+	if cn, ok := a.backend.(interface{ CurrentNamespace() string }); ok {
+		return cn.CurrentNamespace()
+	}
+	return ""
+}
+
 func (a *App) BaseCrumb() string {
 	if p := a.pane(); p != nil {
 		return p.Title
@@ -862,6 +1190,15 @@ func (a *App) ActivePaneID() int {
 	}
 	return 0
 }
+
+// PendingEdit reports the in-flight cell edit awaiting commit, or nil when
+// no edit is in progress. Confirm popups read it to render the proposed
+// change; the "saveedit" command consumes it.
+func (a *App) PendingEdit() *PendingEdit { return a.pendingEdit }
+
+// PendingDelete reports the in-flight row delete awaiting commit, or nil
+// when no delete is in progress.
+func (a *App) PendingDelete() *PendingDelete { return a.pendingDelete }
 
 // compile-time interface checks
 var (

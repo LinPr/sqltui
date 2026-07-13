@@ -129,6 +129,48 @@ func (f *Frame) Select(rows []int) *Frame {
 	return out
 }
 
+// WithCell returns a copy of f with the cell at (row, col) replaced by
+// val. The column type is preserved.
+func (f *Frame) WithCell(row, col int, val any) *Frame {
+	out := &Frame{Columns: make([]Column, len(f.Columns))}
+	for i, c := range f.Columns {
+		cells := make([]any, len(c.Cells))
+		copy(cells, c.Cells)
+		if i == col {
+			cells[row] = val
+		}
+		out.Columns[i] = Column{Name: c.Name, Type: c.Type, Cells: cells}
+	}
+	return out
+}
+
+// WithoutRows returns a copy of f with the rows at the given indices removed.
+// Indices are 0-based; out-of-range indices are ignored. Row order of the
+// surviving rows is preserved.
+func (f *Frame) WithoutRows(rows []int) *Frame {
+	if len(f.Columns) == 0 {
+		return &Frame{Columns: make([]Column, 0)}
+	}
+	n := f.NumRows()
+	drop := make(map[int]bool, len(rows))
+	for _, r := range rows {
+		if r >= 0 && r < n {
+			drop[r] = true
+		}
+	}
+	out := &Frame{Columns: make([]Column, len(f.Columns))}
+	for i, c := range f.Columns {
+		cells := make([]any, 0, len(c.Cells)-len(drop))
+		for r, v := range c.Cells {
+			if !drop[r] {
+				cells = append(cells, v)
+			}
+		}
+		out.Columns[i] = Column{Name: c.Name, Type: c.Type, Cells: cells}
+	}
+	return out
+}
+
 // FormatValue renders a cell value for display.
 func FormatValue(v any) string {
 	switch x := v.(type) {

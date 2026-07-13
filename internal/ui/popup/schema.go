@@ -132,6 +132,14 @@ func newSchemaOverlay(ctx ui.AppContext) *schemaOverlay {
 // CurrentNamespace interface — is resolved and eagerly listed in the same
 // goroutine.
 func (o *schemaOverlay) Init() tea.Cmd {
+	return o.loadCmd()
+}
+
+// loadCmd runs the async namespace listing (plus the eager tables of the
+// connected namespace) and stamps the result with this overlay so stale
+// messages from a previous instance are ignored. It is used by Init and by
+// the 'r' refresh handler.
+func (o *schemaOverlay) loadCmd() tea.Cmd {
 	be := o.backend
 	if be == nil {
 		return nil
@@ -231,30 +239,32 @@ func (o *schemaOverlay) rows() []schemaRow {
 	pattern := o.pattern()
 	var out []schemaRow
 
-	// --- open tabs -------------------------------------------------------
-	titles := make([]string, len(o.tabs))
-	for i, t := range o.tabs {
-		titles[i] = t.Title
-	}
-	tabIdx := fuzzyIndices(pattern, titles)
-	if pattern == "" || len(tabIdx) > 0 {
-		out = append(out, schemaRow{kind: schemaHeader, label: "tabs"})
-		if len(o.tabs) == 0 {
-			out = append(out, schemaRow{kind: schemaNote, label: "(none)"})
+	// --- open tabs (file mode only) -------------------------------------
+	// In db mode the browser is a page in the connect -> browser -> table
+	// stack; open tabs are not relevant, so the tabs section is skipped.
+	if o.backend == nil {
+		titles := make([]string, len(o.tabs))
+		for i, t := range o.tabs {
+			titles[i] = t.Title
 		}
-		for _, i := range tabIdx {
-			out = append(out, schemaRow{
-				kind:  schemaTab,
-				label: fmt.Sprintf("%s  %s", o.tabs[i].Title, o.tabs[i].Shape),
-				tab:   i,
-			})
+		tabIdx := fuzzyIndices(pattern, titles)
+		if pattern == "" || len(tabIdx) > 0 {
+			out = append(out, schemaRow{kind: schemaHeader, label: "tabs"})
+			if len(o.tabs) == 0 {
+				out = append(out, schemaRow{kind: schemaNote, label: "(none)"})
+			}
+			for _, i := range tabIdx {
+				out = append(out, schemaRow{
+					kind:  schemaTab,
+					label: fmt.Sprintf("%s  %s", o.tabs[i].Title, o.tabs[i].Shape),
+					tab:   i,
+				})
+			}
 		}
+		return out
 	}
 
 	// --- live tables -----------------------------------------------------
-	if o.backend == nil {
-		return out
-	}
 	out = append(out, schemaRow{kind: schemaHeader, label: "tables " + o.beTitle})
 	switch {
 	case !o.nsLoaded:
@@ -468,6 +478,22 @@ func (o *schemaOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		o.movePage(rows, -1)
 	case "pgdown":
 		o.movePage(rows, +1)
+	case "r":
+		// Re-trigger the async namespace listing, dropping any cached state
+		// so the refresh starts from a clean slate. Only acts as refresh
+		// when the filter is empty; otherwise 'r' is a filter character.
+		if o.input.String() == "" {
+			o.nsLoaded = false
+			o.nsErr = ""
+			o.groups = nil
+			return o, o.loadCmd()
+		}
+		before := o.input.String()
+		o.input.Handle(key)
+		if o.input.String() != before {
+			o.resetCursor(o.rows())
+			return o, nil
+		}
 	case "enter":
 		return o, o.activate(rows)
 	default:

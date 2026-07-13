@@ -21,6 +21,8 @@ type infoTestCtx struct {
 
 func (c infoTestCtx) CurrentFrame() *data.Frame { return c.frame }
 func (c infoTestCtx) CurrentRow() int           { return 0 }
+func (c infoTestCtx) SheetFieldCursor() int     { return 0 }
+func (c infoTestCtx) CurrentTableNamespace() string { return "" }
 func (c infoTestCtx) BaseCrumb() string {
 	if len(c.crumbs) > 0 {
 		return c.crumbs[0]
@@ -40,6 +42,8 @@ func (c infoTestCtx) ShowRowNumbers() bool  { return false }
 func (c infoTestCtx) Tabs() []ui.TabInfo    { return nil }
 func (c infoTestCtx) ActiveTab() int        { return 0 }
 func (c infoTestCtx) ActivePaneID() int     { return 0 }
+func (c infoTestCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c infoTestCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 func infoTestFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{

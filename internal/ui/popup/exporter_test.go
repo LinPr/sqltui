@@ -23,6 +23,8 @@ type exportStubCtx struct {
 
 func (c *exportStubCtx) CurrentFrame() *data.Frame { return c.frame }
 func (c *exportStubCtx) CurrentRow() int           { return 0 }
+func (c *exportStubCtx) SheetFieldCursor() int     { return 0 }
+func (c *exportStubCtx) CurrentTableNamespace() string { return "" }
 func (c *exportStubCtx) BaseCrumb() string         { return c.crumb }
 func (c *exportStubCtx) Crumbs() []string          { return nil }
 func (c *exportStubCtx) ColumnNames() []string {
@@ -42,6 +44,8 @@ func (c *exportStubCtx) ShowRowNumbers() bool  { return false }
 func (c *exportStubCtx) Tabs() []ui.TabInfo    { return nil }
 func (c *exportStubCtx) ActiveTab() int        { return 0 }
 func (c *exportStubCtx) ActivePaneID() int     { return 0 }
+func (c *exportStubCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c *exportStubCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 func exportTestFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{

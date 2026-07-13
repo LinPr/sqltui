@@ -81,6 +81,12 @@ func (b *Backend) FetchTable(_ string, table string, limit int) (*data.Frame, er
 	return db.StringFrame(fields, records), nil
 }
 
+// PrimaryKeys lists the primary-key column names of a table; the namespace
+// argument is ignored.
+func (b *Backend) PrimaryKeys(_ string, table string) ([]string, error) {
+	return b.db.ListPrimaryKeys(table)
+}
+
 func (b *Backend) Close() error {
 	return b.db.Close()
 }

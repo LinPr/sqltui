@@ -43,7 +43,8 @@ func (b *schemaTestBackend) Tables(ns string) ([]string, error) {
 func (b *schemaTestBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, errors.New("not implemented")
 }
-func (b *schemaTestBackend) Close() error { return nil }
+func (b *schemaTestBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
+func (b *schemaTestBackend) Close() error                                  { return nil }
 
 // schemaTestBackendNS additionally reports a connected namespace through the
 // optional CurrentNamespace interface.
@@ -63,6 +64,8 @@ type schemaTestCtx struct {
 
 func (c schemaTestCtx) CurrentFrame() *data.Frame { return nil }
 func (c schemaTestCtx) CurrentRow() int           { return 0 }
+func (c schemaTestCtx) SheetFieldCursor() int     { return 0 }
+func (c schemaTestCtx) CurrentTableNamespace() string { return "" }
 func (c schemaTestCtx) BaseCrumb() string         { return "" }
 func (c schemaTestCtx) Crumbs() []string          { return nil }
 func (c schemaTestCtx) ColumnNames() []string     { return nil }
@@ -77,6 +80,8 @@ func (c schemaTestCtx) ShowRowNumbers() bool      { return false }
 func (c schemaTestCtx) Tabs() []ui.TabInfo        { return c.tabs }
 func (c schemaTestCtx) ActiveTab() int            { return c.active }
 func (c schemaTestCtx) ActivePaneID() int         { return 0 }
+func (c schemaTestCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c schemaTestCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 // schemaTestMsgs runs a cmd (possibly a batch) and collects all messages.
 func schemaTestMsgs(t *testing.T, cmd tea.Cmd) []tea.Msg {
@@ -411,8 +416,10 @@ func TestSchemaFilterNarrowsTabsAndTables(t *testing.T) {
 			liveRows = append(liveRows, r.label)
 		}
 	}
-	if len(tabRows) != 1 || !strings.Contains(tabRows[0], "users_csv") {
-		t.Errorf("filtered tab rows = %v, want [users_csv ...]", tabRows)
+	// In db mode the tabs section is skipped: no tab rows even when a tab
+	// title matches the filter.
+	if len(tabRows) != 0 {
+		t.Errorf("filtered tab rows = %v, want none in db mode", tabRows)
 	}
 	if len(liveRows) != 1 || liveRows[0] != "users" {
 		t.Errorf("filtered live rows = %v, want [users]", liveRows)
@@ -623,26 +630,21 @@ func TestSchemaNavigationSkipsHeaders(t *testing.T) {
 	be := &schemaTestBackend{namespaces: []string{"m"}, tables: map[string][]string{"m": {"x"}}}
 	ctx := schemaTestCtx{tabs: []ui.TabInfo{{Title: "a", Shape: "1 x 1"}}, backend: be}
 	o := schemaOpen(ctx)
-	// rows: [header tabs][tab a][header tables][group m][live x]
+	// db mode skips the tabs section; rows: [header tables][group m][live x]
 	if o.cursor != 1 {
 		t.Fatalf("initial cursor = %d, want 1", o.cursor)
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if o.cursor != 3 {
-		t.Errorf("cursor after down = %d, want 3 (skipping section header)", o.cursor)
+	if o.cursor != 2 {
+		t.Errorf("cursor after down = %d, want 2", o.cursor)
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if o.cursor != 4 {
-		t.Errorf("cursor after down = %d, want 4", o.cursor)
+	if o.cursor != 2 {
+		t.Errorf("cursor after down at bottom = %d, want 2", o.cursor)
 	}
-	o.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if o.cursor != 4 {
-		t.Errorf("cursor after down at bottom = %d, want 4", o.cursor)
-	}
-	o.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	o.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if o.cursor != 1 {
-		t.Errorf("cursor after two up = %d, want 1", o.cursor)
+		t.Errorf("cursor after up = %d, want 1", o.cursor)
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if o.cursor != 1 {
@@ -773,10 +775,17 @@ func TestSchemaViewContent(t *testing.T) {
 	o := schemaOpen(ctx)
 	th := infoTestTheme(t)
 	v := o.View(80, 24, th)
-	for _, want := range []string{"filter", "tabs", "people", "3 x 2", "users", "stub://db",
+	for _, want := range []string{"filter", "users", "stub://db",
 		"(connected)", "enter to expand"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q", want)
+		}
+	}
+	// In db mode the tabs section is skipped: the header and the tab
+	// title/shape must not appear.
+	for _, absent := range []string{"tabs", "people", "3 x 2"} {
+		if strings.Contains(v, absent) {
+			t.Errorf("view contains %q, want tabs section absent in db mode", absent)
 		}
 	}
 }

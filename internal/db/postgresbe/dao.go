@@ -198,6 +198,34 @@ func (db *DB) FetchTableRecords(schema, table string) (fields []string, records 
 	return db.RawQuery(query)
 }
 
+// ListPrimaryKeys lists the primary-key column names of schema.table, in
+// index-ordinal order. Empty when the table has no primary key.
+func (db *DB) ListPrimaryKeys(schema, table string) ([]string, error) {
+	if db.DB == nil {
+		return nil, fmt.Errorf("postgres connection is not open")
+	}
+	regclass := quoteIdentifier(schema) + "." + quoteIdentifier(table)
+	query := `SELECT a.attname FROM pg_index i
+		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+		WHERE i.indisprimary AND i.indrelid = $1::regclass
+		ORDER BY array_position(i.indkey, a.attnum)`
+	rows, err := db.Query(query, regclass)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pks []string
+	for rows.Next() {
+		var col string
+		if err := rows.Scan(&col); err != nil {
+			return nil, err
+		}
+		pks = append(pks, col)
+	}
+	return pks, rows.Err()
+}
+
 func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }

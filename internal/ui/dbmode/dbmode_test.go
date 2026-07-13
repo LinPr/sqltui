@@ -99,7 +99,8 @@ func (f *fakeBackend) FetchTable(ns, table string, limit int) (*data.Frame, erro
 	f.fetchNS, f.fetchTable, f.fetchLimit = ns, table, limit
 	return f.frame, f.fetchErr
 }
-func (f *fakeBackend) Close() error { return nil }
+func (f *fakeBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
+func (f *fakeBackend) Close() error                                  { return nil }
 
 // fakeKV is a db.KVBackend stub for redis-mode tests.
 type fakeKV struct {
@@ -134,6 +135,8 @@ type fakeCtx struct {
 
 func (c *fakeCtx) CurrentFrame() *data.Frame { return nil }
 func (c *fakeCtx) CurrentRow() int           { return 0 }
+func (c *fakeCtx) SheetFieldCursor() int     { return 0 }
+func (c *fakeCtx) CurrentTableNamespace() string { return "" }
 func (c *fakeCtx) BaseCrumb() string         { return "" }
 func (c *fakeCtx) Crumbs() []string          { return nil }
 func (c *fakeCtx) ColumnNames() []string     { return nil }
@@ -148,6 +151,8 @@ func (c *fakeCtx) ShowRowNumbers() bool      { return false }
 func (c *fakeCtx) Tabs() []ui.TabInfo        { return nil }
 func (c *fakeCtx) ActiveTab() int            { return 0 }
 func (c *fakeCtx) ActivePaneID() int         { return 0 }
+func (c *fakeCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c *fakeCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 var _ ui.AppContext = (*fakeCtx)(nil)
 

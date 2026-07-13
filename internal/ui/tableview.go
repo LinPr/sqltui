@@ -2,6 +2,7 @@ package ui
 
 import (
 	"math/rand"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -29,7 +30,13 @@ type TableView struct {
 
 	snapCursor bool // scroll colCursor into view on next render
 	lastRows   int  // page size observed at last render
+
+	selected map[int]bool // multi-select membership; lazy-init; nil = none
 }
+
+// selectMarker is drawn in the gutter (or the leading tag column when there
+// is no gutter) of rows belonging to the multi-select set.
+const selectMarker = "█"
 
 // RenderOpts carries everything Render needs besides the frame.
 type RenderOpts struct {
@@ -60,10 +67,12 @@ func (tv *TableView) Reset() {
 	tv.sel, tv.rowOff, tv.colOff, tv.colCursor = 0, 0, 0, 0
 	tv.snapCursor = false
 	tv.modeSet = false
+	tv.ClearSelect()
 }
 
 // ClampTo clamps selection and cursor to the bounds of f (used when the
-// underlying frame changes but position should be roughly kept).
+// underlying frame changes but position should be roughly kept). A frame
+// change invalidates the multi-select set, so it is cleared here too.
 func (tv *TableView) ClampTo(f *data.Frame) {
 	if f == nil {
 		tv.Reset()
@@ -73,6 +82,7 @@ func (tv *TableView) ClampTo(f *data.Frame) {
 	tv.rowOff = clamp(tv.rowOff, 0, max(0, f.NumRows()-1))
 	tv.colCursor = clamp(tv.colCursor, 0, f.NumCols()-1)
 	tv.colOff = clamp(tv.colOff, 0, max(0, f.NumCols()-1))
+	tv.ClearSelect()
 }
 
 // --- navigation ------------------------------------------------------------
@@ -110,8 +120,15 @@ func (tv *TableView) ToggleExpanded() {
 	tv.modeSet = true
 }
 
-// NextCol / PrevCol / FirstCol / LastCol move the column cursor (both column
-// modes) and request that it be scrolled into view (wide mode).
+// LastCol moves the column cursor to the last column and requests that it be
+// scrolled into view (wide mode).
+func (tv *TableView) LastCol(ncols int) {
+	tv.colCursor = max(0, ncols-1)
+	tv.snapCursor = true
+}
+
+// NextCol / PrevCol / FirstCol move the column cursor (both column modes)
+// and request that it be scrolled into view (wide mode).
 func (tv *TableView) NextCol(ncols int) {
 	tv.colCursor = clamp(tv.colCursor+1, 0, ncols-1)
 	tv.snapCursor = true
@@ -127,9 +144,43 @@ func (tv *TableView) FirstCol() {
 	tv.snapCursor = true
 }
 
-func (tv *TableView) LastCol(ncols int) {
-	tv.colCursor = max(0, ncols-1)
-	tv.snapCursor = true
+// --- multi-select ----------------------------------------------------------
+
+// ToggleSelect adds a row to (or removes it from) the multi-select set. The
+// set is lazy-initialized on first use so an untouched view stays allocation
+// free.
+func (tv *TableView) ToggleSelect(row int) {
+	if tv.selected == nil {
+		tv.selected = map[int]bool{}
+	}
+	tv.selected[row] = !tv.selected[row]
+	if !tv.selected[row] {
+		delete(tv.selected, row)
+	}
+}
+
+// IsSelected reports whether a row is in the multi-select set.
+func (tv *TableView) IsSelected(row int) bool {
+	return tv.selected != nil && tv.selected[row]
+}
+
+// SelectedRows returns the multi-select members in ascending order. The
+// returned slice is freshly allocated; callers may mutate it freely.
+func (tv *TableView) SelectedRows() []int {
+	if tv.selected == nil {
+		return nil
+	}
+	out := make([]int, 0, len(tv.selected))
+	for r := range tv.selected {
+		out = append(out, r)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// ClearSelect empties the multi-select set.
+func (tv *TableView) ClearSelect() {
+	tv.selected = nil
 }
 
 // --- rendering -------------------------------------------------------------
@@ -279,12 +330,18 @@ func (tv *TableView) Render(f *data.Frame, o RenderOpts) string {
 				cells[j] = padCell(f.CellString(r, c), widths[j])
 			}
 			rowText := strings.Join(cells, " ")
+			sel := tv.IsSelected(r)
 			style := th.RowEven
 			gstyle := th.Gutter
 			switch {
 			case r == tv.sel:
 				style = th.RowSelected
 				gstyle = th.RowSelected
+			case sel:
+				// Multi-select members use the match style so they stay
+				// distinct from the active cursor (th.RowSelected).
+				style = th.Match
+				gstyle = th.Match
 			case o.MatchRows != nil && o.MatchRows[r]:
 				style = th.Match
 			case r%2 == 1:
@@ -293,7 +350,23 @@ func (tv *TableView) Render(f *data.Frame, o RenderOpts) string {
 			gut := ""
 			if gutterW > 0 {
 				num := strconv.Itoa(r + 1)
-				gut = gstyle.Render(padLeft(num, gutterW-1) + " ")
+				if sel {
+					// Replace the gutter's trailing space with the marker so
+					// total width is unchanged.
+					gut = gstyle.Render(padLeft(num, gutterW-1) + selectMarker)
+				} else {
+					gut = gstyle.Render(padLeft(num, gutterW-1) + " ")
+				}
+			} else if sel {
+				// No gutter: lead with a 2-cell tag column and shave it off
+				// the cell budget so the row keeps the same width.
+				tag := th.Match.Render(selectMarker + " ")
+				line = tag + style.Render(padLine(rowText, inner-2))
+				b.WriteString(wrapBorder(line, o.ShowBorders, th))
+				if i < body-1 || o.ShowBorders {
+					b.WriteString("\n")
+				}
+				continue
 			}
 			line = gut + style.Render(padLine(rowText, inner-gutterW))
 		}

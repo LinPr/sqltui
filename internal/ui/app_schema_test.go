@@ -46,7 +46,8 @@ func (b *scCountingBackend) FetchTable(ns, table string, limit int) (*data.Frame
 		{Name: "label", Type: data.TypeString},
 	}}, nil
 }
-func (b *scCountingBackend) Close() error { return nil }
+func (b *scCountingBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
+func (b *scCountingBackend) Close() error                                  { return nil }
 
 func TestCompletionSchemaEnginePath(t *testing.T) {
 	eng, err := query.NewEngine()

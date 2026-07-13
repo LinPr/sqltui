@@ -83,3 +83,13 @@ func TestHasReturningClause(t *testing.T) {
 		}
 	}
 }
+
+// TestPrimaryKeysWithoutConnection exercises the method on a Backend whose
+// underlying handle is nil: it must return an error rather than panic.
+func TestPrimaryKeysWithoutConnection(t *testing.T) {
+	b := &Backend{db: &DB{}}
+	pks, err := b.PrimaryKeys("public", "users")
+	if err == nil {
+		t.Fatalf("expected error from PrimaryKeys with no connection, got pks=%v", pks)
+	}
+}

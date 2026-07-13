@@ -11,39 +11,43 @@ type Binding struct {
 
 // Semantic action names.
 const (
-	ActUp        = "up"
-	ActDown      = "down"
-	ActLeft      = "left"
-	ActRight     = "right"
-	ActTop       = "top"
-	ActBottom    = "bottom"
-	ActHalfUp    = "half-up"
-	ActHalfDown  = "half-down"
-	ActPageUp    = "page-up"
-	ActPageDown  = "page-down"
-	ActFirstCol  = "first-col"
-	ActLastCol   = "last-col"
-	ActSheet     = "sheet"
-	ActExpand    = "expand"
-	ActInfo      = "info"
-	ActRandom    = "random"
-	ActGoto      = "goto"
-	ActFuzzy     = "fuzzy-search"
-	ActExact     = "exact-search"
-	ActPalette   = "palette"
-	ActTabSwitch = "tab-switch"
-	ActPrevTab   = "prev-tab"
-	ActNextTab   = "next-tab"
-	ActPop       = "pop"
-	ActQuit      = "quit"
-	ActHelp      = "help"
-	ActCopy      = "copy"
-	ActCopyCell  = "copy-cell"
-	ActCopyRow   = "copy-row"
-	ActSheetUp   = "sheet-up"
-	ActSheetDown = "sheet-down"
-	ActBack      = "back"
-	ActEscBack   = "esc-back"
+	ActUp           = "up"
+	ActDown         = "down"
+	ActLeft         = "left"
+	ActRight        = "right"
+	ActTop          = "top"
+	ActBottom       = "bottom"
+	ActHalfUp       = "half-up"
+	ActHalfDown     = "half-down"
+	ActPageUp       = "page-up"
+	ActPageDown     = "page-down"
+	ActFirstCol     = "first-col"
+	ActLastCol      = "last-col"
+	ActSheet        = "sheet"
+	ActExpand       = "expand"
+	ActInfo         = "info"
+	ActRandom       = "random"
+	ActGoto         = "goto"
+	ActFuzzy        = "fuzzy-search"
+	ActExact        = "exact-search"
+	ActPalette      = "palette"
+	ActTabSwitch    = "tab-switch"
+	ActPrevTab      = "prev-tab"
+	ActNextTab      = "next-tab"
+	ActPop          = "pop"
+	ActQuit         = "quit"
+	ActHelp         = "help"
+	ActCopy         = "copy"
+	ActCopyCell     = "copy-cell"
+	ActCopyRow      = "copy-row"
+	ActSheetUp      = "sheet-up"
+	ActSheetDown    = "sheet-down"
+	ActBack         = "back"
+	ActEscBack      = "esc-back"
+	ActEdit         = "edit"
+	ActRefresh      = "refresh"
+	ActDelete       = "delete"
+	ActToggleSelect = "toggle-select"
 )
 
 // GlobalBindings apply in every non-overlay mode.
@@ -65,7 +69,7 @@ var TableBindings = []Binding{
 	{Keys: []string{"g", "home"}, Action: ActTop, Help: "first row"},
 	{Keys: []string{"G", "shift+g", "end"}, Action: ActBottom, Help: "last row"},
 	{Keys: []string{"ctrl+u"}, Action: ActHalfUp, Help: "half page up"},
-	{Keys: []string{"ctrl+d"}, Action: ActHalfDown, Help: "half page down"},
+	{Keys: []string{"ctrl+j"}, Action: ActHalfDown, Help: "half page down"},
 	{Keys: []string{"pgup", "ctrl+b"}, Action: ActPageUp, Help: "page up"},
 	{Keys: []string{"pgdown", "ctrl+f"}, Action: ActPageDown, Help: "page down"},
 	{Keys: []string{"_"}, Action: ActFirstCol, Help: "first column"},
@@ -74,6 +78,7 @@ var TableBindings = []Binding{
 	{Keys: []string{"w"}, Action: ActExpand, Help: "toggle fit/wide columns"},
 	{Keys: []string{"i"}, Action: ActInfo, Help: "table info"},
 	{Keys: []string{"R", "shift+r"}, Action: ActRandom, Help: "random row"},
+	{Keys: []string{"r"}, Action: ActRefresh, Help: "refresh data"},
 	{Keys: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}, Action: ActGoto, Help: "go to row"},
 	{Keys: []string{"y"}, Action: ActCopyCell, Help: "copy current cell"},
 	{Keys: []string{"Y", "shift+y"}, Action: ActCopyRow, Help: "copy row (tab-separated)"},
@@ -81,15 +86,19 @@ var TableBindings = []Binding{
 	{Keys: []string{"s"}, Action: ActExact, Help: "exact search"},
 	{Keys: []string{"q"}, Action: ActPop, Help: "pop frame / close tab"},
 	{Keys: []string{"esc"}, Action: ActEscBack, Help: "back / previous level"},
+	{Keys: []string{"ctrl+d"}, Action: ActDelete, Help: "delete row(s)"},
+	{Keys: []string{"space"}, Action: ActToggleSelect, Help: "toggle select"},
 }
 
 // SheetBindings apply in sheet mode.
 var SheetBindings = []Binding{
-	{Keys: []string{"shift+down", "J", "shift+j"}, Action: ActSheetDown, Help: "scroll down"},
-	{Keys: []string{"shift+up", "K", "shift+k"}, Action: ActSheetUp, Help: "scroll up"},
-	{Keys: []string{"down", "j"}, Action: ActSheetDown, Help: "scroll down"},
-	{Keys: []string{"up", "k"}, Action: ActSheetUp, Help: "scroll up"},
+	{Keys: []string{"down", "j"}, Action: ActSheetDown, Help: "next field"},
+	{Keys: []string{"up", "k"}, Action: ActSheetUp, Help: "prev field"},
+	{Keys: []string{"shift+down", "J", "shift+j"}, Action: ActSheetDown, Help: "next field"},
+	{Keys: []string{"shift+up", "K", "shift+k"}, Action: ActSheetUp, Help: "prev field"},
 	{Keys: []string{"c"}, Action: ActCopy, Help: "copy row"},
+	{Keys: []string{"e"}, Action: ActEdit, Help: "edit field"},
+	{Keys: []string{"r"}, Action: ActRefresh, Help: "refresh"},
 	{Keys: []string{"q", "esc"}, Action: ActBack, Help: "back to table"},
 }
 

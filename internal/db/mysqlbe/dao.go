@@ -240,6 +240,36 @@ func (db *DB) Close() error {
 	return db.DB.Close()
 }
 
+// PrimaryKeys lists the primary-key column names of database.table, in
+// key-ordinal order. If database is empty the connection's current database
+// is used.
+func (db *DB) PrimaryKeys(database, table string) ([]string, error) {
+	if db.DB == nil {
+		return nil, fmt.Errorf("mysql connection is not open")
+	}
+	if database == "" {
+		database = db.dbName
+	}
+	query := `SELECT column_name FROM information_schema.key_column_usage
+		WHERE table_schema = ? AND table_name = ?
+		ORDER BY ordinal_position`
+	rows, err := db.Query(query, database, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pks []string
+	for rows.Next() {
+		var col string
+		if err := rows.Scan(&col); err != nil {
+			return nil, err
+		}
+		pks = append(pks, col)
+	}
+	return pks, rows.Err()
+}
+
 // quoteIdent quotes a mysql identifier with backticks, doubling any
 // embedded backtick.
 func quoteIdent(name string) string {

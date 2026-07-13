@@ -117,6 +117,11 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 	return b.queryFrame(query)
 }
 
+// PrimaryKeys lists the primary-key column names of namespace.table.
+func (b *Backend) PrimaryKeys(namespace, table string) ([]string, error) {
+	return b.db.ListPrimaryKeys(namespace, table)
+}
+
 func (b *Backend) Close() error {
 	return b.db.Close()
 }

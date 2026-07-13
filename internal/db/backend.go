@@ -34,6 +34,10 @@ type Backend interface {
 	Tables(namespace string) ([]string, error)
 	// FetchTable loads up to limit rows of a table.
 	FetchTable(namespace, table string, limit int) (*data.Frame, error)
+	// PrimaryKeys lists the primary-key column names of namespace.table
+	// (empty when the table has no primary key). Engines without namespaces
+	// ignore namespace.
+	PrimaryKeys(namespace, table string) ([]string, error)
 	Close() error
 }
 

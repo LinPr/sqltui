@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LinPr/sqltui/internal/theme"
@@ -137,7 +138,8 @@ func (o *helpOverlay) View(width, height int, th *theme.Theme) string {
 		}
 		keys := ansi.Truncate(l.Keys, keyW, "…")
 		keys += strings.Repeat(" ", keyW-ansi.StringWidth(keys))
-		line := " " + th.Match.Render(keys) + "  " + th.Text.Render(l.Text)
+		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(th.Palette.Accent)).Bold(true)
+		line := " " + keyStyle.Render(keys) + "  " + th.Text.Render(l.Text)
 		out = append(out, line)
 	}
 

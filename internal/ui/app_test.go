@@ -147,8 +147,15 @@ func TestAppSheetFlow(t *testing.T) {
 		t.Fatal("enter should open the sheet")
 	}
 	v := a.View()
-	if !strings.Contains(v.Content, "row 1 of 20") {
+	plain := ansi.Strip(v.Content)
+	if !strings.Contains(plain, "row 1 of 20") {
 		t.Fatal("sheet header missing")
+	}
+	if !strings.Contains(plain, "│") {
+		t.Fatalf("sheet missing the key|value separator:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Key") || !strings.Contains(plain, "Value") {
+		t.Fatalf("sheet missing the key/value column header:\n%s", plain)
 	}
 	a.Update(key("q"))
 	if p := a.pane(); p.Mode != ModeTable {
@@ -607,6 +614,7 @@ func (fakeBackend) Run(string) (db.Result, error)                       { return
 func (fakeBackend) Namespaces() ([]string, error)                       { return nil, nil }
 func (fakeBackend) Tables(string) ([]string, error)                     { return nil, nil }
 func (fakeBackend) FetchTable(string, string, int) (*data.Frame, error) { return nil, nil }
+func (fakeBackend) PrimaryKeys(string, string) ([]string, error)        { return nil, nil }
 func (fakeBackend) Close() error                                        { return nil }
 
 func TestAppStatusBarConnectionTitle(t *testing.T) {

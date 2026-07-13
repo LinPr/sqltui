@@ -36,6 +36,14 @@ type ApplyFrameMsg struct {
 	RegisterAs string
 }
 
+// ReplaceBaseMsg swaps the base frame of the pane identified by PaneID
+// (or the active pane when zero), used by the refresh command to reload
+// the current table without opening a new tab.
+type ReplaceBaseMsg struct {
+	Frame  *data.Frame
+	PaneID int
+}
+
 // RunCommandMsg invokes a named command. Built-in names (quit, reset,
 // toggleborders, togglerownumbers, reloadconfig) are handled by the app
 // directly; everything else is resolved through the Factories registry.
