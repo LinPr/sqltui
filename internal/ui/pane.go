@@ -41,6 +41,12 @@ type Pane struct {
 	SheetEdit []rune
 	// SheetEditCur is the rune cursor within SheetEdit.
 	SheetEditCur int
+	// SheetFilter holds the current field-filter pattern typed after "/".
+	// SheetField is always interpreted as an index INTO the matched set
+	// (sheetMatchedCols), not a raw column index; with an empty filter the
+	// matched set is every column so the two coincide.
+	SheetFilter    []rune
+	SheetFiltering bool
 }
 
 // paneIDCounter hands out stable unique pane IDs (see Pane.ID).
@@ -115,6 +121,8 @@ func (p *Pane) resetSheet() {
 	p.SheetEditing = false
 	p.SheetEdit = nil
 	p.SheetEditCur = 0
+	p.SheetFilter = nil
+	p.SheetFiltering = false
 }
 
 // Crumbs returns the breadcrumb chain: tab title, then one label per

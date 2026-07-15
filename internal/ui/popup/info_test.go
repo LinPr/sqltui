@@ -1,6 +1,7 @@
 package popup
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -17,12 +18,14 @@ import (
 type infoTestCtx struct {
 	frame  *data.Frame
 	crumbs []string
+	ns     string
+	backend db.Backend
 }
 
 func (c infoTestCtx) CurrentFrame() *data.Frame { return c.frame }
 func (c infoTestCtx) CurrentRow() int           { return 0 }
 func (c infoTestCtx) SheetFieldCursor() int     { return 0 }
-func (c infoTestCtx) CurrentTableNamespace() string { return "" }
+func (c infoTestCtx) CurrentTableNamespace() string { return c.ns }
 func (c infoTestCtx) BaseCrumb() string {
 	if len(c.crumbs) > 0 {
 		return c.crumbs[0]
@@ -33,7 +36,7 @@ func (c infoTestCtx) Crumbs() []string      { return c.crumbs }
 func (c infoTestCtx) ColumnNames() []string { return nil }
 func (c infoTestCtx) Engine() *query.Engine { return nil }
 func (c infoTestCtx) TableNames() []string  { return nil }
-func (c infoTestCtx) Backend() db.Backend   { return nil }
+func (c infoTestCtx) Backend() db.Backend   { return c.backend }
 func (c infoTestCtx) KV() db.KVBackend      { return nil }
 func (c infoTestCtx) Theme() *theme.Theme   { return nil }
 func (c infoTestCtx) ThemeName() string     { return "" }
@@ -44,6 +47,29 @@ func (c infoTestCtx) ActiveTab() int        { return 0 }
 func (c infoTestCtx) ActivePaneID() int     { return 0 }
 func (c infoTestCtx) PendingEdit() *ui.PendingEdit   { return nil }
 func (c infoTestCtx) PendingDelete() *ui.PendingDelete { return nil }
+
+// infoTestBackend is a stub db.Backend for info overlay tests; ColumnsMeta
+// returns the provided slice (or err).
+type infoTestBackend struct {
+	meta []db.ColumnMeta
+	err  error
+}
+
+func (b *infoTestBackend) Kind() string                  { return "stub" }
+func (b *infoTestBackend) Title() string                 { return "stub://db" }
+func (b *infoTestBackend) Run(string) (db.Result, error) { return db.Result{}, errors.New("not implemented") }
+func (b *infoTestBackend) Namespaces() ([]string, error) { return []string{""}, nil }
+func (b *infoTestBackend) Tables(string) ([]string, error) {
+	return nil, errors.New("not implemented")
+}
+func (b *infoTestBackend) FetchTable(string, string, int) (*data.Frame, error) {
+	return nil, errors.New("not implemented")
+}
+func (b *infoTestBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
+func (b *infoTestBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) {
+	return b.meta, b.err
+}
+func (b *infoTestBackend) Close() error { return nil }
 
 func infoTestFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
@@ -92,10 +118,11 @@ func TestInfoBuild(t *testing.T) {
 	if len(o.list) != 3 {
 		t.Fatalf("list len = %d, want 3", len(o.list))
 	}
+	// File-mode fallback: Type is the frame DType, metadata fields empty.
 	want := []infoColRow{
-		{Name: "id", Dtype: "i64", Nulls: 1},
-		{Name: "name", Dtype: "str", Nulls: 2},
-		{Name: "score", Dtype: "f64", Nulls: 0},
+		{Name: "id", Type: "i64"},
+		{Name: "name", Type: "str"},
+		{Name: "score", Type: "f64"},
 	}
 	for i, w := range want {
 		if o.list[i] != w {
@@ -171,6 +198,176 @@ func TestInfoViewContent(t *testing.T) {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q", want)
 		}
+	}
+}
+
+// TestInfoFileModeUsesDType asserts that without a backend the listing uses
+// the frame's inferred DType and leaves the metadata fields blank.
+func TestInfoFileModeUsesDType(t *testing.T) {
+	ctx := infoTestCtx{frame: infoTestFrame(), crumbs: []string{"people"}}
+	o := newInfoOverlay(ctx, ctx.frame)
+	if o.loading {
+		t.Fatal("file mode should not be loading")
+	}
+	if cmd := o.Init(); cmd != nil {
+		t.Fatalf("Init in file mode should return nil, got %v", cmd)
+	}
+	if len(o.list) != 3 {
+		t.Fatalf("list len = %d, want 3", len(o.list))
+	}
+	want := []infoColRow{
+		{Name: "id", Type: "i64"},
+		{Name: "name", Type: "str"},
+		{Name: "score", Type: "f64"},
+	}
+	for i, w := range want {
+		if o.list[i] != w {
+			t.Errorf("list[%d] = %+v, want %+v", i, o.list[i], w)
+		}
+	}
+	th := infoTestTheme(t)
+	v := o.View(80, 24, th)
+	for _, want := range []string{"i64", "str", "f64"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("file-mode view missing %q", want)
+		}
+	}
+}
+
+// TestInfoDBModeLoadsMeta drives Init+Update with a fake backend whose
+// ColumnsMeta returns two entries and asserts the listing shows the real
+// metadata (not the frame DType).
+func TestInfoDBModeLoadsMeta(t *testing.T) {
+	be := &infoTestBackend{meta: []db.ColumnMeta{
+		{Name: "id", DataType: "int", IsNullable: "NO", Default: ""},
+		{Name: "email", DataType: "varchar(255)", IsNullable: "YES", Default: "", Comment: "primary contact"},
+	}}
+	ctx := infoTestCtx{
+		frame:   infoTestFrame(),
+		crumbs:  []string{"users"},
+		ns:      "public",
+		backend: be,
+	}
+	o := newInfoOverlay(ctx, ctx.frame)
+	if !o.loading {
+		t.Fatal("db mode should start loading")
+	}
+	// Pre-fetch listing is the frame fallback (placeholder).
+	if len(o.list) != 3 || o.list[0].Type != "i64" {
+		t.Fatalf("placeholder listing = %+v", o.list)
+	}
+
+	cmd := o.Init()
+	if cmd == nil {
+		t.Fatal("Init in db mode should return a cmd")
+	}
+	msg := cmd()
+	cm, ok := msg.(columnsMetaMsg)
+	if !ok {
+		t.Fatalf("Init cmd msg = %T, want columnsMetaMsg", msg)
+	}
+	if cm.owner != o {
+		t.Fatal("columnsMetaMsg owner mismatch")
+	}
+	if cm.err != nil {
+		t.Fatalf("ColumnsMeta err = %v", cm.err)
+	}
+	if len(cm.meta) != 2 {
+		t.Fatalf("meta len = %d, want 2", len(cm.meta))
+	}
+
+	ov, _ := o.Update(cm)
+	o = ov.(*infoOverlay)
+	if o.loading {
+		t.Fatal("still loading after Update")
+	}
+	if len(o.list) != 2 {
+		t.Fatalf("list len after meta = %d, want 2", len(o.list))
+	}
+	want := []infoColRow{
+		{Name: "id", Type: "int", NotNull: "NO", Default: "", Comment: ""},
+		{Name: "email", Type: "varchar(255)", NotNull: "YES", Default: "", Comment: "primary contact"},
+	}
+	for i, w := range want {
+		if o.list[i] != w {
+			t.Errorf("list[%d] = %+v, want %+v", i, o.list[i], w)
+		}
+	}
+	// The frame DType (i64/str/f64) must NOT appear once metadata loaded.
+	th := infoTestTheme(t)
+	v := o.View(80, 24, th)
+	for _, gone := range []string{"i64", "str", "f64"} {
+		if strings.Contains(v, gone) {
+			t.Errorf("db-mode view should not contain frame DType %q", gone)
+		}
+	}
+	for _, want := range []string{"int", "varchar(255)", "primary contact", "NO", "YES"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("db-mode view missing %q", want)
+		}
+	}
+}
+
+// TestInfoDBModeLoadError asserts a ColumnsMeta error is surfaced in the view.
+func TestInfoDBModeLoadError(t *testing.T) {
+	be := &infoTestBackend{err: errors.New("boom")}
+	ctx := infoTestCtx{frame: infoTestFrame(), crumbs: []string{"users"}, backend: be}
+	o := newInfoOverlay(ctx, ctx.frame)
+	cmd := o.Init()
+	msg := cmd().(columnsMetaMsg)
+	ov, _ := o.Update(msg)
+	o = ov.(*infoOverlay)
+	if o.loading {
+		t.Fatal("should stop loading on error")
+	}
+	if o.loadErr != "boom" {
+		t.Errorf("loadErr = %q, want %q", o.loadErr, "boom")
+	}
+	th := infoTestTheme(t)
+	if v := o.View(80, 24, th); !strings.Contains(v, "boom") {
+		t.Errorf("view should contain error, got:\n%s", v)
+	}
+}
+
+// TestInfoIgnoresStaleMetaMsg asserts a columnsMetaMsg from another owner is
+// ignored.
+func TestInfoIgnoresStaleMetaMsg(t *testing.T) {
+	ctx := infoTestCtx{frame: infoTestFrame(), crumbs: []string{"users"}}
+	o := newInfoOverlay(ctx, ctx.frame)
+	before := len(o.list)
+	other := &infoOverlay{}
+	ov, _ := o.Update(columnsMetaMsg{owner: other, meta: []db.ColumnMeta{{Name: "x", DataType: "int"}}})
+	o = ov.(*infoOverlay)
+	if len(o.list) != before {
+		t.Fatalf("stale msg mutated list: now %d, want %d", len(o.list), before)
+	}
+}
+
+// TestInfoCtrlDNotPageDown asserts ctrl+d was removed from the info key list
+// (it is table-delete now) and no longer pages down.
+func TestInfoCtrlDNotPageDown(t *testing.T) {
+	f := &data.Frame{}
+	for i := 0; i < 40; i++ {
+		f.Columns = append(f.Columns, data.Column{Name: "c", Type: data.TypeString, Cells: []any{nil}})
+	}
+	o := newInfoOverlay(infoTestCtx{frame: f, crumbs: []string{"t"}}, f)
+	o.View(80, 20, infoTestTheme(t)) // establish viewRows
+	maxOff := 40 - o.viewRows
+	// From the top, ctrl+d should NOT advance the offset.
+	o.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if o.offset != 0 {
+		t.Errorf("ctrl+d advanced offset to %d, want 0 (removed from key list)", o.offset)
+	}
+	// pgdown still pages down.
+	o.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if o.offset <= 0 || o.offset > maxOff {
+		t.Errorf("pgdown offset = %d, want (0,%d]", o.offset, maxOff)
+	}
+	// ctrl+f still pages down (from top).
+	o.offset = 0
+	o.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if o.offset <= 0 || o.offset > maxOff {
+		t.Errorf("ctrl+f offset = %d, want (0,%d]", o.offset, maxOff)
 	}
 }
 

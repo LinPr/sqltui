@@ -207,6 +207,38 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CopyTextMsg:
 		return a, tea.Batch(tea.SetClipboard(m.Text), a.setToast("copied to clipboard"))
 
+	case columnMetaMsg:
+		// An async ColumnsMeta fetch finished. On success store the metadata
+		// into the completion cache so the next View shows the real type
+		// instead of the frame DType fallback. The cache may be unbound when
+		// WarmCompletionSchema never ran (cold open); bind it to the current
+		// backend in that case. A cache bound to a different backend
+		// (connection swapped mid-flight) rejects the store.
+		if m.err == nil && m.meta != nil && a.backend != nil {
+			c := a.completionCache()
+			c.mu.Lock()
+			if c.backend == nil {
+				c.backend = a.backend
+				c.ns = make(map[string]string)
+				c.cols = make(map[string][]string)
+				c.meta = make(map[string][]db.ColumnMeta)
+				c.fetched = make(map[string]bool)
+			}
+			if c.backend == a.backend {
+				c.meta[m.table] = m.meta
+				c.fetched[m.table] = true
+				if c.cols[m.table] == nil {
+					cols := make([]string, len(m.meta))
+					for i, cm := range m.meta {
+						cols[i] = cm.Name
+					}
+					c.cols[m.table] = cols
+				}
+			}
+			c.mu.Unlock()
+		}
+		return a, nil
+
 	case tea.PasteMsg:
 		// Bracketed paste follows key routing: the top overlay swallows it;
 		// with no overlay open it feeds the active search bar.
@@ -321,7 +353,8 @@ func (a *App) renderBody(w, h int) string {
 
 	if p.Mode == ModeSheet && frame != nil && frame.NumRows() > 0 {
 		return renderSheet(frame, p.Table.Sel(), p.SheetOff, w, h, p.SheetField,
-			p.SheetEditing, p.SheetEdit, p.SheetEditCur, p.SheetValOff, a.th)
+			p.SheetEditing, p.SheetEdit, p.SheetEditCur, p.SheetValOff,
+			string(p.SheetFilter), p.SheetFiltering, a.cursorFieldType(), a.th)
 	}
 
 	return p.Table.Render(frame, RenderOpts{
@@ -395,9 +428,138 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if p.SheetEditing {
 			return a.handleSheetEditKey(msg)
 		}
+		// While the field-filter input is active, keys go to the filter
+		// handler instead of the normal dispatch so "/" can pre-type the
+		// first rune and esc clears the filter instead of leaving sheet mode.
+		if p.SheetFiltering {
+			return a.handleSheetFilterKey(msg)
+		}
 		return a, a.dispatch(actionFor(key, SheetBindings, GlobalBindings), key)
 	}
 	return a, a.dispatch(actionFor(key, TableBindings, GlobalBindings), key)
+}
+
+// handleSheetFilterKey routes keys while the sheet field-filter input is
+// active. esc/ctrl+c clear the filter and exit filter input; enter commits the
+// current pattern (filter stays applied, input closes); backspace pops the
+// last rune; ctrl+u clears the text; up/down/j/k move the cursor within the
+// matched set; printable runes append and reset the cursor to the first
+// match. After each change the matched set is recomputed and SheetField is
+// clamped, with the left list edge-followed.
+func (a *App) handleSheetFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	p := a.pane()
+	if p == nil {
+		return a, nil
+	}
+	f := p.Current()
+	if f == nil {
+		return a, nil
+	}
+	key := msg.String()
+	switch key {
+	case "esc", "ctrl+c":
+		p.SheetFiltering = false
+		p.SheetFilter = nil
+		p.SheetField = 0
+		p.SheetOff = 0
+		return a, nil
+	case "enter":
+		p.SheetFiltering = false
+		// Keep the filter applied. Clamp the cursor to the matched set and
+		// edge-follow so the entry stays visible.
+		a.clampSheetToMatched(f, p)
+		return a, nil
+	case "backspace", "ctrl+h":
+		if len(p.SheetFilter) > 0 {
+			p.SheetFilter = p.SheetFilter[:len(p.SheetFilter)-1]
+		}
+		p.SheetField = 0
+		p.SheetOff = 0
+		a.clampSheetToMatched(f, p)
+		return a, nil
+	case "ctrl+u":
+		p.SheetFilter = nil
+		p.SheetField = 0
+		p.SheetOff = 0
+		return a, nil
+	case "up", "k":
+		if p.SheetField > 0 {
+			p.SheetField--
+		}
+		p.SheetValOff = 0
+		a.edgeFollowSheet(f, p)
+		return a, nil
+	case "down", "j":
+		matched := sheetMatchedCols(f, string(p.SheetFilter))
+		if len(matched) > 0 && p.SheetField < len(matched)-1 {
+			p.SheetField++
+		}
+		p.SheetValOff = 0
+		a.edgeFollowSheet(f, p)
+		return a, nil
+	default:
+		if t := msg.Key().Text; t != "" && msg.Mod == 0 {
+			p.SheetFilter = append(p.SheetFilter, []rune(t)...)
+			p.SheetField = 0
+			p.SheetOff = 0
+			a.clampSheetToMatched(f, p)
+		}
+		return a, nil
+	}
+}
+
+// clampSheetToMatched ensures SheetField is a valid index into the current
+// matched set and re-runs the left-list edge-follow. Called after every
+// filter mutation that can shrink the matched set.
+func (a *App) clampSheetToMatched(f *data.Frame, p *Pane) {
+	matched := sheetMatchedCols(f, string(p.SheetFilter))
+	if len(matched) == 0 {
+		p.SheetField = 0
+		p.SheetOff = 0
+		return
+	}
+	if p.SheetField >= len(matched) {
+		p.SheetField = len(matched) - 1
+	}
+	if p.SheetField < 0 {
+		p.SheetField = 0
+	}
+	a.edgeFollowSheet(f, p)
+}
+
+// edgeFollowSheet advances SheetOff so the cursored entry stays visible in
+// the left list, mirroring renderSheet's geometry. It assumes SheetField is a
+// valid index into the current matched set.
+func (a *App) edgeFollowSheet(f *data.Frame, p *Pane) {
+	matched := sheetMatchedCols(f, string(p.SheetFilter))
+	if len(matched) == 0 {
+		p.SheetOff = 0
+		return
+	}
+	keyW, _ := sheetTableGeometry(f, a.width)
+	bodyH := max(1, a.height-1)
+	// Mirror renderSheet's header accounting: row header, optional filter
+	// line, and the Key|Value column header.
+	headers := 2
+	if p.SheetFiltering || strings.TrimSpace(string(p.SheetFilter)) != "" {
+		headers = 3
+	}
+	visible := bodyH - headers
+	if visible < 1 {
+		visible = 1
+	}
+	maxOff := max(0, sheetKeyLineCountCols(f, matched, keyW)-visible)
+	curStart := sheetKeyLineOffsetCols(f, matched, p.SheetField, keyW)
+	curEnd := curStart + sheetKeyEntryHeightCols(f, matched, p.SheetField, keyW) - 1
+	if curStart < p.SheetOff {
+		p.SheetOff = curStart
+	} else if curEnd >= p.SheetOff+visible {
+		p.SheetOff = curEnd - visible + 1
+		if p.SheetOff > curStart {
+			p.SheetOff = curStart
+		}
+	}
+	p.SheetOff = clamp(p.SheetOff, 0, maxOff)
 }
 
 // handleSheetEditKey routes keys while a sheet field is being inline-edited.
@@ -632,18 +794,35 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 			p.SheetEditing = false
 			p.SheetEdit = nil
 			p.SheetEditCur = 0
+			p.SheetFilter = nil
+			p.SheetFiltering = false
+			// Warm the column-metadata cache for this table so the sheet shows
+			// the real engine type (e.g. "varchar(255)") instead of the frame
+			// DType fallback ("str" on mysql). Skipped when the cache is already
+			// populated or in file mode (no backend -> warmColumnMeta is nil).
+			if a.backend != nil && a.columnMetaFor(p.Title) == nil {
+				return a.warmColumnMeta(p.Title)
+			}
 		}
+	case ActSheetFilter:
+		// "/" enters filter input with a fresh buffer. While already filtering
+		// this is never reached: handleKey routes to handleSheetFilterKey
+		// before dispatch, so a literal "/" lands as a printable rune.
+		p.SheetFilter = nil
+		p.SheetFiltering = true
+		return nil
 	case ActBack:
 		p.Mode = ModeTable
 	case ActSheetDown, ActSheetUp:
-		if ncols == 0 {
+		matched := sheetMatchedCols(f, string(p.SheetFilter))
+		if len(matched) == 0 {
 			return nil
 		}
 		delta := 1
 		if action == ActSheetUp {
 			delta = -1
 		}
-		p.SheetField = clamp(p.SheetField+delta, 0, ncols-1)
+		p.SheetField = clamp(p.SheetField+delta, 0, len(matched)-1)
 		// A new field shows its value from the top, and cancels any in-flight
 		// inline edit (the edit buffer belongs to the previous field).
 		p.SheetValOff = 0
@@ -652,27 +831,7 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 			p.SheetEdit = nil
 			p.SheetEditCur = 0
 		}
-		// Edge-follow the LEFT key list only. visible mirrors renderSheet:
-		// bodyH = max(1, height-1) (one line for the status bar), then two
-		// more for the "row N of M" head and the Key|Value column header.
-		keyW, _ := sheetTableGeometry(f, a.width)
-		bodyH := max(1, a.height-1)
-		visible := bodyH - 2
-		if visible < 1 {
-			visible = 1
-		}
-		maxOff := max(0, sheetKeyLineCount(f, keyW)-visible)
-		curStart := sheetKeyLineOffset(f, p.SheetField, keyW)
-		curEnd := curStart + sheetKeyEntryHeight(f, p.SheetField, keyW) - 1
-		if curStart < p.SheetOff {
-			p.SheetOff = curStart
-		} else if curEnd >= p.SheetOff+visible {
-			p.SheetOff = curEnd - visible + 1
-			if p.SheetOff > curStart {
-				p.SheetOff = curStart
-			}
-		}
-		p.SheetOff = clamp(p.SheetOff, 0, maxOff)
+		a.edgeFollowSheet(f, p)
 	case ActCopy:
 		text := rowClipboardText(f, p.Table.Sel())
 		return tea.Batch(tea.SetClipboard(text), a.setToast("copied to clipboard"))
@@ -1114,6 +1273,34 @@ func (a *App) CurrentTableNamespace() string {
 		return cn.CurrentNamespace()
 	}
 	return ""
+}
+
+// warmColumnMeta returns a tea.Cmd that fetches the real column metadata for
+// table off the update loop. The resulting columnMetaMsg populates the
+// completion cache, so the next View shows the engine-native type inline with
+// the value instead of the frame DType fallback. The cache is touched under
+// lock only when the connection still matches by the time the fetch returns.
+// Returns nil in file mode (no backend).
+func (a *App) warmColumnMeta(table string) tea.Cmd {
+	be := a.backend
+	if be == nil || table == "" {
+		return nil
+	}
+	ns := a.CurrentTableNamespace()
+	tableC := table
+	return func() tea.Msg {
+		m, err := be.ColumnsMeta(ns, tableC)
+		return columnMetaMsg{table: tableC, meta: m, err: err}
+	}
+}
+
+// cursorFieldType returns just the data-type token of the active sheet field
+// (e.g. "int", "varchar(255)", "i64"). It reuses cursorFieldMeta so the same
+// cache-then-DType fallback path applies: real engine type when the cache is
+// warm, the frame DType otherwise. Empty when no pane/frame is active.
+func (a *App) cursorFieldType() string {
+	dt, _, _, _ := a.cursorFieldMeta()
+	return dt
 }
 
 func (a *App) BaseCrumb() string {

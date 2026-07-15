@@ -31,8 +31,9 @@ func (b *cellEditBackend) Tables(string) ([]string, error) { return nil, nil }
 func (b *cellEditBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, nil
 }
-func (b *cellEditBackend) PrimaryKeys(string, string) ([]string, error) { return b.pks, nil }
-func (b *cellEditBackend) Close() error                                  { return nil }
+func (b *cellEditBackend) PrimaryKeys(string, string) ([]string, error)    { return b.pks, nil }
+func (b *cellEditBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
+func (b *cellEditBackend) Close() error                                    { return nil }
 
 func cellEditFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{

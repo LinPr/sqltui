@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
+
+	dbapi "github.com/LinPr/sqltui/internal/db"
 )
 
 const (
@@ -268,6 +270,40 @@ func (db *DB) PrimaryKeys(database, table string) ([]string, error) {
 		pks = append(pks, col)
 	}
 	return pks, rows.Err()
+}
+
+// ColumnsMeta returns column metadata for database.table, in ordinal order.
+// If database is empty the connection's current database is used.
+func (db *DB) ColumnsMeta(database, table string) ([]dbapi.ColumnMeta, error) {
+	if db.DB == nil {
+		return nil, fmt.Errorf("mysql connection is not open")
+	}
+	if database == "" {
+		database = db.dbName
+	}
+	query := `SELECT column_name, data_type, is_nullable, column_default, column_comment
+		FROM information_schema.columns
+		WHERE table_schema = ? AND table_name = ?
+		ORDER BY ordinal_position`
+	rows, err := db.Query(query, database, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cols []dbapi.ColumnMeta
+	for rows.Next() {
+		var c dbapi.ColumnMeta
+		var defaultVal sql.NullString
+		if err := rows.Scan(&c.Name, &c.DataType, &c.IsNullable, &defaultVal, &c.Comment); err != nil {
+			return nil, err
+		}
+		if defaultVal.Valid {
+			c.Default = defaultVal.String
+		}
+		cols = append(cols, c)
+	}
+	return cols, rows.Err()
 }
 
 // quoteIdent quotes a mysql identifier with backticks, doubling any

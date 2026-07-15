@@ -48,6 +48,7 @@ const (
 	ActRefresh      = "refresh"
 	ActDelete       = "delete"
 	ActToggleSelect = "toggle-select"
+	ActSheetFilter  = "sheet-filter"
 )
 
 // GlobalBindings apply in every non-overlay mode.
@@ -99,6 +100,7 @@ var SheetBindings = []Binding{
 	{Keys: []string{"c"}, Action: ActCopy, Help: "copy row"},
 	{Keys: []string{"e"}, Action: ActEdit, Help: "edit field"},
 	{Keys: []string{"r"}, Action: ActRefresh, Help: "refresh"},
+	{Keys: []string{"/"}, Action: ActSheetFilter, Help: "filter fields"},
 	{Keys: []string{"q", "esc"}, Action: ActBack, Help: "back to table"},
 }
 

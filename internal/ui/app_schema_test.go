@@ -47,6 +47,7 @@ func (b *scCountingBackend) FetchTable(ns, table string, limit int) (*data.Frame
 	}}, nil
 }
 func (b *scCountingBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
+func (b *scCountingBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
 func (b *scCountingBackend) Close() error                                  { return nil }
 
 func TestCompletionSchemaEnginePath(t *testing.T) {

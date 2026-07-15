@@ -215,6 +215,7 @@ func (b *errConfirmBackend) Namespaces() ([]string, error)                      
 func (b *errConfirmBackend) Tables(string) ([]string, error)                     { return nil, nil }
 func (b *errConfirmBackend) FetchTable(string, string, int) (*data.Frame, error) { return nil, nil }
 func (b *errConfirmBackend) PrimaryKeys(string, string) ([]string, error)        { return nil, nil }
+func (b *errConfirmBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
 func (b *errConfirmBackend) Close() error                                        { return nil }
 
 func TestConfirmSaveOverlayInterface(t *testing.T) {

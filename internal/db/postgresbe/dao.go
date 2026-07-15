@@ -10,6 +10,8 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	dbapi "github.com/LinPr/sqltui/internal/db"
 )
 
 const (
@@ -224,6 +226,43 @@ func (db *DB) ListPrimaryKeys(schema, table string) ([]string, error) {
 		pks = append(pks, col)
 	}
 	return pks, rows.Err()
+}
+
+// ColumnsMeta returns column metadata for schema.table, in ordinal order.
+// Column comments are resolved via col_description.
+func (db *DB) ColumnsMeta(schema, table string) ([]dbapi.ColumnMeta, error) {
+	if db.DB == nil {
+		return nil, fmt.Errorf("postgres connection is not open")
+	}
+	regclass := quoteIdentifier(schema) + "." + quoteIdentifier(table)
+	query := `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
+		col_description($1::regclass, c.ordinal_position)
+		FROM information_schema.columns c
+		WHERE c.table_schema = $2 AND c.table_name = $3
+		ORDER BY c.ordinal_position`
+	rows, err := db.Query(query, regclass, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cols []dbapi.ColumnMeta
+	for rows.Next() {
+		var c dbapi.ColumnMeta
+		var defaultVal sql.NullString
+		var comment sql.NullString
+		if err := rows.Scan(&c.Name, &c.DataType, &c.IsNullable, &defaultVal, &comment); err != nil {
+			return nil, err
+		}
+		if defaultVal.Valid {
+			c.Default = defaultVal.String
+		}
+		if comment.Valid {
+			c.Comment = comment.String
+		}
+		cols = append(cols, c)
+	}
+	return cols, rows.Err()
 }
 
 func quoteIdentifier(name string) string {

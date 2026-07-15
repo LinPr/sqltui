@@ -165,3 +165,41 @@ func TestListPrimaryKeys(t *testing.T) {
 		t.Fatalf("expected [k v], got %v", pks)
 	}
 }
+
+func TestColumnsMeta(t *testing.T) {
+	db := newTestDB(t)
+
+	if _, err := db.RawExec(`CREATE TABLE meta_demo (
+		id INTEGER NOT NULL PRIMARY KEY,
+		email TEXT NOT NULL DEFAULT 'unknown',
+		note TEXT
+	)`); err != nil {
+		t.Fatalf("create meta_demo: %v", err)
+	}
+
+	cols, err := db.ColumnsMeta("meta_demo")
+	if err != nil {
+		t.Fatalf("ColumnsMeta(meta_demo): %v", err)
+	}
+	if len(cols) != 3 {
+		t.Fatalf("expected 3 columns, got %d (%v)", len(cols), cols)
+	}
+
+	// id: NOT NULL INTEGER PRIMARY KEY, no default literal.
+	id := cols[0]
+	if id.Name != "id" || id.DataType != "INTEGER" || id.IsNullable != "NO" || id.Default != "" || id.Comment != "" {
+		t.Fatalf("id column = %+v", id)
+	}
+
+	// email: NOT NULL with a default literal.
+	email := cols[1]
+	if email.Name != "email" || email.DataType != "TEXT" || email.IsNullable != "NO" || email.Default != "'unknown'" || email.Comment != "" {
+		t.Fatalf("email column = %+v", email)
+	}
+
+	// note: nullable, no default.
+	note := cols[2]
+	if note.Name != "note" || note.DataType != "TEXT" || note.IsNullable != "YES" || note.Default != "" || note.Comment != "" {
+		t.Fatalf("note column = %+v", note)
+	}
+}

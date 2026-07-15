@@ -110,6 +110,11 @@ func (b *Backend) PrimaryKeys(namespace, table string) ([]string, error) {
 	return b.db.PrimaryKeys(namespace, table)
 }
 
+// ColumnsMeta returns column metadata for namespace.table.
+func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) {
+	return b.db.ColumnsMeta(namespace, table)
+}
+
 func (b *Backend) Close() error {
 	return b.db.Close()
 }

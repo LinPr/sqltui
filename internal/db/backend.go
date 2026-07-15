@@ -19,6 +19,19 @@ type Result struct {
 	Exec  *ExecResult
 }
 
+// ColumnMeta describes one column of a live table, for the info overlay
+// and the row sheet type display. DataType is the engine-native type name
+// (e.g. "int", "varchar(255)", "text"); IsNullable is "YES"/"NO" or "" when
+// unknown; Default is the column default literal or ""; Comment is the
+// column comment or "".
+type ColumnMeta struct {
+	Name       string
+	DataType   string
+	IsNullable string
+	Default    string
+	Comment    string
+}
+
 // Backend is a live SQL database connection.
 type Backend interface {
 	// Kind identifies the engine: "mysql", "postgres" or "sqlite".
@@ -38,6 +51,9 @@ type Backend interface {
 	// (empty when the table has no primary key). Engines without namespaces
 	// ignore namespace.
 	PrimaryKeys(namespace, table string) ([]string, error)
+	// ColumnsMeta returns column metadata for namespace.table, in ordinal
+	// order. Engines without namespaces ignore namespace.
+	ColumnsMeta(namespace, table string) ([]ColumnMeta, error)
 	Close() error
 }
 

@@ -82,3 +82,13 @@ func TestPrimaryKeysWithoutConnection(t *testing.T) {
 		t.Fatalf("expected error from PrimaryKeys with no connection, got pks=%v", pks)
 	}
 }
+
+// TestColumnsMetaWithoutConnection exercises the method on a Backend whose
+// underlying handle is nil: it must return an error rather than panic.
+func TestColumnsMetaWithoutConnection(t *testing.T) {
+	b := &Backend{db: &DB{}}
+	cols, err := b.ColumnsMeta("shop", "users")
+	if err == nil {
+		t.Fatalf("expected error from ColumnsMeta with no connection, got cols=%v", cols)
+	}
+}

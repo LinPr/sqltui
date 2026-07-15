@@ -86,3 +86,12 @@ type ExecProcessMsg struct {
 
 // CopyTextMsg copies text to the system clipboard via OSC52.
 type CopyTextMsg struct{ Text string }
+
+// columnMetaMsg delivers asynchronously-fetched column metadata for a table so
+// the sheet view can display the real column type. The cache stores it under
+// the table name when the err is nil and the backend still matches.
+type columnMetaMsg struct {
+	table string
+	meta  []db.ColumnMeta
+	err   error
+}

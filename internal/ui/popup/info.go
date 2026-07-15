@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LinPr/sqltui/internal/data"
+	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/theme"
 	"github.com/LinPr/sqltui/internal/ui"
 )
@@ -24,14 +25,33 @@ func init() {
 
 // infoColRow is one precomputed line of the per-column mini table.
 type infoColRow struct {
-	Name  string
-	Dtype string
-	Nulls int
+	Name    string
+	Type    string
+	NotNull string
+	Default string
+	Comment string
+}
+
+// columnsMetaMsg carries the async column-metadata result back to the overlay
+// that issued the fetch. The owner pointer lets stale messages from a prior
+// instance be ignored.
+type columnsMetaMsg struct {
+	owner *infoOverlay
+	meta  []db.ColumnMeta
+	err   error
 }
 
 // infoOverlay shows metadata about the current frame: title, breadcrumb,
-// shape, estimated size and a scrollable per-column listing.
+// shape, estimated size and a scrollable per-column listing. In db mode the
+// listing is refreshed asynchronously from live column metadata; in file mode
+// it falls back to the frame's inferred DType.
 type infoOverlay struct {
+	ctx      ui.AppContext
+	frame    *data.Frame
+	loading  bool
+	meta     []db.ColumnMeta
+	loadErr  string
+
 	title  string
 	crumbs []string
 	rows   int
@@ -45,25 +65,80 @@ type infoOverlay struct {
 
 func newInfoOverlay(ctx ui.AppContext, f *data.Frame) *infoOverlay {
 	o := &infoOverlay{
+		ctx:      ctx,
+		frame:    f,
 		title:    ctx.BaseCrumb(),
 		crumbs:   ctx.Crumbs(),
 		rows:     f.NumRows(),
 		cols:     f.NumCols(),
 		size:     data.EstimatedSize(f),
 		viewRows: 10,
+		loading:  ctx.Backend() != nil,
 	}
-	for i := range f.Columns {
-		c := &f.Columns[i]
-		o.list = append(o.list, infoColRow{
-			Name:  c.Name,
-			Dtype: c.Type.String(),
-			Nulls: data.NullCount(c),
-		})
-	}
+	// Build the initial listing from the frame so the overlay shows something
+	// immediately; in db mode this is a placeholder until the meta arrives.
+	o.list = infoRowsFromFrame(f)
 	return o
 }
 
+// infoRowsFromFrame builds the file-mode fallback listing from a frame's
+// inferred column types.
+func infoRowsFromFrame(f *data.Frame) []infoColRow {
+	rows := make([]infoColRow, 0, len(f.Columns))
+	for i := range f.Columns {
+		c := &f.Columns[i]
+		rows = append(rows, infoColRow{
+			Name: c.Name,
+			Type: c.Type.String(),
+		})
+	}
+	return rows
+}
+
+// infoRowsFromMeta rebuilds the listing from live column metadata.
+func infoRowsFromMeta(meta []db.ColumnMeta) []infoColRow {
+	rows := make([]infoColRow, 0, len(meta))
+	for i := range meta {
+		m := &meta[i]
+		rows = append(rows, infoColRow{
+			Name:    m.Name,
+			Type:    m.DataType,
+			NotNull: m.IsNullable,
+			Default: m.Default,
+			Comment: m.Comment,
+		})
+	}
+	return rows
+}
+
+// Init kicks off the async column-metadata fetch in db mode
+// (ui.OverlayIniter). In file mode there is nothing to fetch.
+func (o *infoOverlay) Init() tea.Cmd {
+	be := o.ctx.Backend()
+	if be == nil {
+		return nil
+	}
+	ns := o.ctx.CurrentTableNamespace()
+	table := o.ctx.BaseCrumb()
+	owner := o
+	return func() tea.Msg {
+		m, err := be.ColumnsMeta(ns, table)
+		return columnsMetaMsg{owner: owner, meta: m, err: err}
+	}
+}
+
 func (o *infoOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
+	if m, ok := msg.(columnsMetaMsg); ok && m.owner == o {
+		o.loading = false
+		if m.err != nil {
+			o.loadErr = m.err.Error()
+		} else {
+			o.meta = m.meta
+			o.list = infoRowsFromMeta(m.meta)
+		}
+		o.offset = 0
+		return o, nil
+	}
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return o, nil
@@ -77,7 +152,7 @@ func (o *infoOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		o.offset++
 	case "pgup", "ctrl+u", "ctrl+b":
 		o.offset -= max(1, o.viewRows)
-	case "pgdown", "ctrl+d", "ctrl+f":
+	case "pgdown", "ctrl+f":
 		o.offset += max(1, o.viewRows)
 	case "g", "home":
 		o.offset = 0
@@ -104,13 +179,24 @@ func (o *infoOverlay) View(width, height int, th *theme.Theme) string {
 	lines = append(lines, label("size: ", infoHumanSize(o.size)))
 	lines = append(lines, "")
 
-	// Mini table geometry: name | dtype | nulls.
-	dtypeW, nullsW := 8, 8
-	nameW := inner - 2 - dtypeW - 1 - nullsW - 1
-	if nameW < 8 {
-		nameW = 8
+	// Mini table geometry: name | type | not null | default | comment.
+	const nameCap = 24
+	typeW, nullW, defaultW := 12, 8, 14
+	nameW := 8
+	for _, r := range o.list {
+		if w := len(r.Name); w > nameW {
+			nameW = w
+		}
 	}
-	header := fmt.Sprintf(" %-*s %-*s %*s ", nameW, "column", dtypeW, "type", nullsW, "nulls")
+	if nameW > nameCap {
+		nameW = nameCap
+	}
+	commentW := inner - nameW - typeW - nullW - defaultW - 6
+	if commentW < 6 {
+		commentW = 6
+	}
+	header := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s ",
+		nameW, "column", typeW, "type", nullW, "not null", defaultW, "default", commentW, "comment")
 	lines = append(lines, th.Header.Render(ansi.Truncate(header, inner, "…")))
 
 	// How many list rows fit: full height minus borders (2) and header lines.
@@ -124,15 +210,26 @@ func (o *infoOverlay) View(width, height int, th *theme.Theme) string {
 	o.viewRows = max(1, avail)
 	o.offset = infoClamp(o.offset, 0, max(0, len(o.list)-o.viewRows))
 
-	for i := o.offset; i < o.offset+o.viewRows && i < len(o.list); i++ {
-		r := o.list[i]
-		name := ansi.Truncate(r.Name, nameW, "…")
-		row := fmt.Sprintf(" %-*s %-*s %*d ", nameW, name, dtypeW, r.Dtype, nullsW, r.Nulls)
-		lines = append(lines, th.Text.Render(ansi.Truncate(row, inner, "…")))
+	switch {
+	case o.loading:
+		lines = append(lines, th.Subtle.Render(" loading..."))
+	case o.loadErr != "":
+		lines = append(lines, th.Error.Render(" "+ansi.Truncate(o.loadErr, inner, "…")))
+	default:
+		for i := o.offset; i < o.offset+o.viewRows && i < len(o.list); i++ {
+			r := o.list[i]
+			name := ansi.Truncate(r.Name, nameW, "…")
+			row := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s ",
+				nameW, name, typeW, ansi.Truncate(r.Type, typeW, "…"),
+				nullW, ansi.Truncate(r.NotNull, nullW, "…"),
+				defaultW, ansi.Truncate(r.Default, defaultW, "…"),
+				commentW, ansi.Truncate(r.Comment, commentW, "…"))
+			lines = append(lines, th.Text.Render(ansi.Truncate(row, inner, "…")))
+		}
 	}
 
 	hint := " q/esc close"
-	if len(o.list) > o.viewRows {
+	if !o.loading && o.loadErr == "" && len(o.list) > o.viewRows {
 		hint = fmt.Sprintf(" %d-%d of %d  •  j/k scroll  •  q/esc close",
 			o.offset+1, o.offset+o.viewRows, len(o.list))
 	}
@@ -166,3 +263,8 @@ func infoClamp(v, lo, hi int) int {
 	}
 	return v
 }
+
+var (
+	_ ui.Overlay       = (*infoOverlay)(nil)
+	_ ui.OverlayIniter = (*infoOverlay)(nil)
+)

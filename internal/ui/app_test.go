@@ -614,8 +614,9 @@ func (fakeBackend) Run(string) (db.Result, error)                       { return
 func (fakeBackend) Namespaces() ([]string, error)                       { return nil, nil }
 func (fakeBackend) Tables(string) ([]string, error)                     { return nil, nil }
 func (fakeBackend) FetchTable(string, string, int) (*data.Frame, error) { return nil, nil }
-func (fakeBackend) PrimaryKeys(string, string) ([]string, error)        { return nil, nil }
-func (fakeBackend) Close() error                                        { return nil }
+func (fakeBackend) PrimaryKeys(string, string) ([]string, error)            { return nil, nil }
+func (fakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)    { return nil, nil }
+func (fakeBackend) Close() error                                           { return nil }
 
 func TestAppStatusBarConnectionTitle(t *testing.T) {
 	a := New(Options{

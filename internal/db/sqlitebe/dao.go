@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	_ "modernc.org/sqlite"
+
+	dbapi "github.com/LinPr/sqltui/internal/db"
 )
 
 const (
@@ -220,6 +222,35 @@ func (db *DB) ListPrimaryKeys(table string) ([]string, error) {
 		}
 	}
 	return pks, nil
+}
+
+// ColumnsMeta returns column metadata for table, in ordinal order. The
+// namespace argument is ignored: sqlite files have no schema level. Column
+// comments are not supported and stay empty.
+func (db *DB) ColumnsMeta(table string) ([]dbapi.ColumnMeta, error) {
+	query := fmt.Sprintf(`SELECT name, type, "notnull", dflt_value FROM pragma_table_info(%s) ORDER BY cid`, quoteString(table))
+	_, records, err := db.RawQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	cols := make([]dbapi.ColumnMeta, 0, len(records))
+	for _, record := range records {
+		if len(record) < 4 {
+			continue
+		}
+		c := dbapi.ColumnMeta{
+			Name:       record[0],
+			DataType:   record[1],
+			IsNullable: "NO",
+			Default:    record[3],
+		}
+		// pragma_table_info reports notnull as 0 (nullable) or 1 (not null).
+		if record[2] == "0" {
+			c.IsNullable = "YES"
+		}
+		cols = append(cols, c)
+	}
+	return cols, nil
 }
 
 func (db *DB) Close() error {

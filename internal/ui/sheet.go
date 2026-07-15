@@ -2,9 +2,11 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/sahilm/fuzzy"
 
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/theme"
@@ -114,6 +116,107 @@ func sheetValueLineCount(f *data.Frame, row, field, valW int) int {
 	return strings.Count(ansi.Wrap(val, valW, ""), "\n") + 1
 }
 
+// sheetMatchedCols returns the column indices whose name fuzzy-matches the
+// trimmed pattern (case-insensitive). An empty pattern matches every column
+// (0..NumCols-1). fuzzy.Find already ranks results; the returned slice is
+// re-sorted by column index so the left list keeps its natural top-to-bottom
+// order. A nil frame yields nil.
+func sheetMatchedCols(f *data.Frame, pattern string) []int {
+	if f == nil {
+		return nil
+	}
+	pattern = strings.TrimSpace(strings.ToLower(pattern))
+	if pattern == "" {
+		out := make([]int, f.NumCols())
+		for i := range out {
+			out[i] = i
+		}
+		return out
+	}
+	names := make([]string, f.NumCols())
+	for i := range names {
+		names[i] = strings.ToLower(f.Columns[i].Name)
+	}
+	matches := fuzzy.Find(pattern, names)
+	out := make([]int, len(matches))
+	for i, m := range matches {
+		out[i] = m.Index
+	}
+	sort.Ints(out)
+	return out
+}
+
+// sheetKeyEntryHeightCols reports the wrapped line count of one entry in a
+// matched-column left list. cols is the matched index slice; pos is the index
+// INTO cols (not a raw column index).
+func sheetKeyEntryHeightCols(f *data.Frame, cols []int, pos, keyW int) int {
+	if f == nil || pos < 0 || pos >= len(cols) {
+		return 1
+	}
+	return sheetKeyEntryHeight(f, cols[pos], keyW)
+}
+
+// sheetKeyLineOffsetCols returns the left-list line index where the entry at
+// position pos in cols begins (the sum of entry heights of all preceding
+// matched positions).
+func sheetKeyLineOffsetCols(f *data.Frame, cols []int, pos, keyW int) int {
+	if f == nil || pos <= 0 {
+		return 0
+	}
+	n := 0
+	for c := 0; c < pos && c < len(cols); c++ {
+		n += sheetKeyEntryHeight(f, cols[c], keyW)
+	}
+	return n
+}
+
+// sheetKeyLineCountCols reports the total left-list line count across every
+// matched entry in cols.
+func sheetKeyLineCountCols(f *data.Frame, cols []int, keyW int) int {
+	if f == nil {
+		return 0
+	}
+	n := 0
+	for _, c := range cols {
+		n += sheetKeyEntryHeight(f, c, keyW)
+	}
+	return n
+}
+
+// sheetKeyListCols renders the matched columns' key names as wrapped lines,
+// highlighting the entry at position fieldCursor (an index INTO cols). Each
+// rendered line is padded to keyW cells; the cursor marker prefixes the first
+// line of the cursor entry.
+func sheetKeyListCols(f *data.Frame, cols []int, keyW, fieldCursor int, th *theme.Theme) []string {
+	const markW = 2
+	avail := keyW - markW
+	if avail < 1 {
+		avail = 1
+	}
+	var lines []string
+	for pos, c := range cols {
+		name := sheetSanitize(f.Columns[c].Name)
+		if name == "" {
+			name = " "
+		}
+		wrapped := strings.Split(ansi.Wrap(name, avail, ""), "\n")
+		cursor := pos == fieldCursor
+		keyStyle := th.Header
+		if cursor {
+			keyStyle = th.RowSelected
+		}
+		for i, wl := range wrapped {
+			mark := "  "
+			if cursor && i == 0 {
+				mark = sheetCursorMark + " "
+			}
+			cell := keyStyle.Render(padLine(mark+wl, keyW))
+			lines = append(lines, cell)
+		}
+	}
+	return lines
+}
+
 // sheetEditText renders the edit runes as plain text for wrapping. The block
 // cursor styling is applied per visible line in sheetRenderValueLine.
 func sheetEditText(runes []rune) string {
@@ -160,24 +263,48 @@ func sheetEditLineOf(editRunes []rune, editCur, valW int) (lineIdx, lineStart in
 // off is the left-list scroll offset (Pane.SheetOff); valOff is the right
 // value scroll offset (Pane.SheetValOff). renderSheet clamps both
 // defensively; the edge-follow mutation stays in the caller.
-func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editing bool, editRunes []rune, editCur, valOff int, th *theme.Theme) string {
+//
+// filter is the current field-filter pattern; filtering reports whether the
+// filter input is active (a cursor is shown on the filter line). The left
+// list narrows to the matched columns (sheetMatchedCols) and fieldCursor is
+// interpreted as an index INTO the matched set, not a raw column. When the
+// matched set is empty the body shows a subtle "no matching fields" line.
+//
+// fieldType is the cursored field's data-type token (e.g. "int",
+// "varchar(255)", "i64"). When non-empty it is appended as a " (type)" suffix
+// to the FIRST value line, sharing the value's styling. The tag is suppressed
+// while editing so the block cursor stays clean. Empty means no tag (e.g. a
+// column with no resolvable type).
+func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editing bool, editRunes []rune, editCur, valOff int, filter string, filtering bool, fieldType string, th *theme.Theme) string {
 	if f == nil || f.NumRows() == 0 || width <= 0 || height <= 0 {
 		return blankLines(max(1, width), max(1, height), th)
 	}
 	row = clamp(row, 0, f.NumRows()-1)
-	fieldCursor = clamp(fieldCursor, 0, f.NumCols()-1)
 	inner := width
 	if inner < 1 {
 		inner = 1
 	}
 	keyW, valW := sheetTableGeometry(f, inner)
-	visible := height - 2 // header line + column header
-	if visible < 1 {
-		visible = 1
+
+	matched := sheetMatchedCols(f, filter)
+	// fieldCursor is an index into matched; resolve the real column for the
+	// right pane. Empty matched set -> no field.
+	actualCol := -1
+	if len(matched) > 0 {
+		fieldCursor = clamp(fieldCursor, 0, len(matched)-1)
+		actualCol = matched[fieldCursor]
+	} else {
+		fieldCursor = 0
 	}
 
+	// Header lines: row N of M, an optional filter line, then Key|Value.
 	head := fmt.Sprintf("row %d of %d", row+1, f.NumRows())
 	out := []string{th.Subtle.Render(padLine(head, inner))}
+
+	showFilterLine := filtering || strings.TrimSpace(filter) != ""
+	if showFilterLine {
+		out = append(out, sheetFilterLine(filter, filtering, inner, th))
+	}
 
 	sep := th.Border.Render(sheetSepChar)
 	colHeader := th.Header.Render(padLine("Key", keyW)) + sep + th.Header.Render(padLine("Value", valW))
@@ -186,25 +313,40 @@ func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editin
 	}
 	out = append(out, colHeader)
 
-	// --- left list: keys -----------------------------------------------------
-	keyLines := sheetKeyList(f, keyW, fieldCursor, th)
+	visible := height - len(out) // remaining body lines
+	if visible < 1 {
+		visible = 1
+	}
+
+	if len(matched) == 0 {
+		out = append(out, th.Placeholder.Render(padLine("no matching fields", inner)))
+		for i := 1; i < visible; i++ {
+			out = append(out, th.Text.Render(strings.Repeat(" ", inner)))
+		}
+		return strings.Join(out, "\n")
+	}
+
+	// --- left list: keys (matched only) --------------------------------------
+	keyLines := sheetKeyListCols(f, matched, keyW, fieldCursor, th)
 	maxOff := max(0, len(keyLines)-visible)
 	off = clamp(off, 0, maxOff)
 
-	// --- right pane: only the cursored field value ---------------------------
+	// --- right pane: the cursored field value, with an inline type tag -------
 	var valueText string
 	if editing {
 		valueText = sheetEditText(editRunes)
 	} else {
-		valueText = sheetSanitize(f.CellString(row, fieldCursor))
+		valueText = sheetSanitize(f.CellString(row, actualCol))
 		if valueText == "" {
 			valueText = " "
 		}
 	}
 	valWrapped := ansi.Wrap(valueText, valW, "")
 	valLines := strings.Split(valWrapped, "\n")
-	valVisible := visible
-	maxValOff := max(0, len(valLines)-valVisible)
+	if fieldType != "" && !editing && len(valLines) > 0 {
+		valLines[0] = valLines[0] + " (" + fieldType + ")"
+	}
+	maxValOff := max(0, len(valLines)-visible)
 	valOff = clamp(valOff, 0, maxValOff)
 
 	for i := 0; i < visible; i++ {
@@ -229,6 +371,28 @@ func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editin
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
+}
+
+// sheetFilterLine renders the field-filter input line. While filtering, a
+// block cursor sits at the end of the typed text; when the pattern is empty
+// the placeholder hints at the action. When not filtering but a pattern is
+// still applied, the text is shown plainly.
+func sheetFilterLine(filter string, filtering bool, inner int, th *theme.Theme) string {
+	prefix := th.Subtle.Render(" filter ")
+	var body string
+	switch {
+	case filtering && filter == "":
+		body = th.Placeholder.Render("type to filter fields")
+	case filtering:
+		body = th.Input.Render(filter) + th.ListSelected.Render(" ")
+	default:
+		body = th.Input.Render(filter)
+	}
+	line := prefix + body
+	if w := ansi.StringWidth(line); w < inner {
+		line += th.Text.Render(strings.Repeat(" ", inner-w))
+	}
+	return line
 }
 
 // sheetKeyList renders every field's key name as one or more wrapped lines,

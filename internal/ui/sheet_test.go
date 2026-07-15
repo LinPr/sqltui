@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LinPr/sqltui/internal/data"
+	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/reader"
 	"github.com/LinPr/sqltui/internal/theme"
 )
@@ -137,7 +139,7 @@ func TestSheetValueLineCount(t *testing.T) {
 func TestRenderSheetKeyListAndSeparator(t *testing.T) {
 	f := sheetTestFrame()
 	th := theme.Default()
-	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, th)
+	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", false, "", th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "│") {
 		t.Fatalf("separator missing:\n%s", plain)
@@ -159,7 +161,7 @@ func TestRenderSheetShowsOnlyCursorFieldValue(t *testing.T) {
 	th := theme.Default()
 	// Cursor on field 2 (comment). The right pane must show the comment
 	// value but NOT the name value.
-	out := renderSheet(f, 0, 0, 40, 8, 2, false, nil, 0, 0, th)
+	out := renderSheet(f, 0, 0, 40, 8, 2, false, nil, 0, 0, "", false, "", th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "a longer comment cell") {
 		t.Fatalf("cursor field value missing from right pane:\n%s", plain)
@@ -172,7 +174,7 @@ func TestRenderSheetShowsOnlyCursorFieldValue(t *testing.T) {
 func TestRenderSheetLongKeyWraps(t *testing.T) {
 	f := longKeyFrame()
 	th := theme.Default()
-	out := renderSheet(f, 0, 0, 50, 10, 1, false, nil, 0, 0, th)
+	out := renderSheet(f, 0, 0, 50, 10, 1, false, nil, 0, 0, "", false, "", th)
 	plain := ansi.Strip(out)
 	// The wrapped key name should appear (at least the first fragment). The
 	// keyW cap is 20, so the name is truncated to fit on the first line.
@@ -205,7 +207,7 @@ func TestRenderSheetEdgeFollow(t *testing.T) {
 	maxOff := max(0, sheetKeyLineCount(f, keyW)-visible)
 	off = clamp(off, 0, maxOff)
 
-	out := renderSheet(f, 0, off, inner, height, lastField, false, nil, 0, 0, th)
+	out := renderSheet(f, 0, off, inner, height, lastField, false, nil, 0, 0, "", false, "", th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "notes") {
 		t.Fatalf("cursor field 'notes' should be visible under edge-follow:\n%s", plain)
@@ -220,7 +222,7 @@ func TestRenderSheetEditMode(t *testing.T) {
 	th := theme.Default()
 	// Edit the id field; the edit runes should appear in the rendered output.
 	editRunes := []rune("99")
-	out := renderSheet(f, 0, 0, 40, 6, 0, true, editRunes, 2, 0, th)
+	out := renderSheet(f, 0, 0, 40, 6, 0, true, editRunes, 2, 0, "", false, "", th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "99") {
 		t.Fatalf("edit runes missing from right pane:\n%s", plain)
@@ -370,3 +372,434 @@ func TestActEditEscCancels(t *testing.T) {
 		t.Fatal("esc should clear the edit buffer")
 	}
 }
+
+// metaBackend is a minimal db.Backend whose ColumnsMeta returns a fixed
+// column list, so cursorFieldMeta can be exercised against a realistic
+// metadata shape without a live connection.
+type metaBackend struct {
+	fakeBackend
+	meta []db.ColumnMeta
+}
+
+func (b *metaBackend) Namespaces() ([]string, error) { return []string{"main"}, nil }
+func (b *metaBackend) Tables(string) ([]string, error) { return []string{"users"}, nil }
+func (b *metaBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) {
+	return b.meta, nil
+}
+
+// TestRenderSheetInlineTypeTag asserts that a non-empty fieldType is appended
+// as a " (type)" suffix to the first value line, inline with the value (not a
+// separate reserved line). The tag is suppressed while editing.
+func TestRenderSheetInlineTypeTag(t *testing.T) {
+	f := sheetTestFrame()
+	th := theme.Default()
+	out := renderSheet(f, 0, 0, 40, 6, 0, false, nil, 0, 0, "", false, "int", th)
+	plain := ansi.Strip(out)
+
+	lines := strings.Split(plain, "\n")
+	// Lines: 0 = "row N of M" header, 1 = "Key|Value" col header, 2 = first
+	// body line whose right cell is the cursor field value with the type tag.
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d:\n%s", len(lines), plain)
+	}
+	if !strings.Contains(lines[2], "(int)") {
+		t.Fatalf("first body line should contain the inline type tag, got %q:\n%s", lines[2], plain)
+	}
+	// The cursor field value "1" (id field) and the tag share the same line.
+	if !strings.Contains(lines[2], "1") {
+		t.Fatalf("first body line should contain the cursor value, got %q:\n%s", lines[2], plain)
+	}
+
+	// While editing, the type tag must NOT appear (the block cursor stays clean).
+	editOut := renderSheet(f, 0, 0, 40, 6, 0, true, []rune("99"), 2, 0, "", false, "int", th)
+	editPlain := ansi.Strip(editOut)
+	for _, l := range strings.Split(editPlain, "\n") {
+		if strings.Contains(l, "(int)") {
+			t.Fatalf("type tag must be suppressed while editing, found in line %q:\n%s", l, editPlain)
+		}
+	}
+
+	// An empty fieldType renders no tag at all.
+	plainOut := renderSheet(f, 0, 0, 40, 6, 0, false, nil, 0, 0, "", false, "", th)
+	plainPlain := ansi.Strip(plainOut)
+	if strings.Contains(plainPlain, "(int)") {
+		t.Fatalf("empty fieldType must not render a tag:\n%s", plainPlain)
+	}
+}
+
+// TestCursorFieldMetaDBAndFileMode asserts cursorFieldMeta resolves the
+// cached engine metadata in db mode, and falls back to the frame DType in
+// file mode.
+func TestCursorFieldMetaDBAndFileMode(t *testing.T) {
+	// DB mode: the completion cache is warmed with column metadata for the
+	// active pane's table; cursorFieldMeta must surface the engine-native
+	// type and constraints.
+	f := data.New("id", "name")
+	f.AppendRow([]any{"1", "alice"})
+	be := &metaBackend{
+		meta: []db.ColumnMeta{
+			{Name: "id", DataType: "integer", IsNullable: "NO", Default: "0", Comment: "pk"},
+			{Name: "name", DataType: "varchar(255)", IsNullable: "YES"},
+		},
+	}
+	a := New(Options{
+		Frames:  []reader.NamedFrame{{Name: "users", Frame: f}},
+		Backend: be,
+	})
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	a.Update(key("enter"))
+	a.WarmCompletionSchema("users")
+
+	// Sanity: the schema cache must have populated metadata for "users".
+	if m := a.columnMetaFor("users"); m == nil || len(m) != 2 {
+		t.Fatalf("columnMetaFor(users) = %v, want 2 columns", m)
+	}
+
+	dt, notNull, def, comment := a.cursorFieldMeta()
+	if dt != "integer" {
+		t.Fatalf("db-mode dataType = %q, want integer", dt)
+	}
+	if notNull != "NO" {
+		t.Fatalf("db-mode notNull = %q, want NO", notNull)
+	}
+	if def != "0" {
+		t.Fatalf("db-mode default = %q, want 0", def)
+	}
+	if comment != "pk" {
+		t.Fatalf("db-mode comment = %q, want pk", comment)
+	}
+
+	// Move to the name field; metadata follows by column NAME match.
+	a.Update(key("j"))
+	dt, notNull, _, _ = a.cursorFieldMeta()
+	if dt != "varchar(255)" {
+		t.Fatalf("db-mode name dataType = %q, want varchar(255)", dt)
+	}
+	if notNull != "YES" {
+		t.Fatalf("db-mode name notNull = %q, want YES", notNull)
+	}
+
+	// File mode: no backend, so no meta; cursorFieldMeta falls back to the
+	// frame DType string and empty constraints.
+	fileA := New(Options{
+		Frames: []reader.NamedFrame{{Name: "one", Frame: f}},
+	})
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	fileA.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	fileA.Update(key("enter"))
+	dt, notNull, def, comment = fileA.cursorFieldMeta()
+	if dt != data.TypeString.String() {
+		t.Fatalf("file-mode dataType = %q, want %q", dt, data.TypeString.String())
+	}
+	if notNull != "" || def != "" || comment != "" {
+		t.Fatalf("file-mode constraints should be empty, got notNull=%q def=%q comment=%q", notNull, def, comment)
+	}
+}
+
+// TestSheetWarmsColumnMetaAndShowsRealType asserts that ActSheet in db mode
+// issues a warmColumnMeta command, and once the resulting columnMetaMsg is
+// processed the sheet view shows the real engine type inline with the value
+// (not the frame DType fallback). In file mode (no backend) ActSheet shows the
+// frame DType instead.
+func TestSheetWarmsColumnMetaAndShowsRealType(t *testing.T) {
+	// DB mode: ColumnsMeta returns a real type for the id column. The frame is
+	// all TypeString, so without warming the sheet would show "str".
+	f := data.New("id", "name")
+	f.AppendRow([]any{"1", "alice"})
+	be := &metaBackend{
+		meta: []db.ColumnMeta{
+			{Name: "id", DataType: "int", IsNullable: "NO"},
+			{Name: "name", DataType: "varchar(255)", IsNullable: "YES"},
+		},
+	}
+	a := New(Options{
+		Frames:  []reader.NamedFrame{{Name: "users", Frame: f}},
+		Backend: be,
+	})
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Right after ActSheet the cache is cold; cursorFieldType falls back to
+	// the frame DType ("str"). ActSheet returns a warmColumnMeta cmd.
+	_, cmd := a.Update(key("enter"))
+	if p := a.pane(); p.Mode != ModeSheet {
+		t.Fatal("enter should open the sheet")
+	}
+	if cmd == nil {
+		t.Fatal("ActSheet in db mode with a cold cache should return a warmColumnMeta cmd")
+	}
+	// Drive the warm cmd to completion and feed the resulting msg back in.
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("warmColumnMeta cmd should produce a columnMetaMsg")
+	}
+	if _, ok := msg.(columnMetaMsg); !ok {
+		t.Fatalf("warmColumnMeta cmd produced %T, want columnMetaMsg", msg)
+	}
+	a.Update(msg)
+
+	// Now the cache is warm; the sheet view must show the real type inline.
+	if got := a.cursorFieldType(); got != "int" {
+		t.Fatalf("cursorFieldType after warm = %q, want int", got)
+	}
+	v := a.View()
+	plain := ansi.Strip(v.Content)
+	if !strings.Contains(plain, "(int)") {
+		t.Fatalf("sheet view should show the real type inline as (int):\n%s", plain)
+	}
+
+	// File mode: no backend -> ActSheet returns nil cmd and the view shows the
+	// frame DType ("str") inline instead of a real engine type.
+	fileA := New(Options{
+		Frames: []reader.NamedFrame{{Name: "one", Frame: f}},
+	})
+	fileA.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	_, fileCmd := fileA.Update(key("enter"))
+	if fileCmd != nil {
+		t.Fatalf("ActSheet in file mode should return nil cmd, got %v", fileCmd)
+	}
+	if got := fileA.cursorFieldType(); got != data.TypeString.String() {
+		t.Fatalf("file-mode cursorFieldType = %q, want %q", got, data.TypeString.String())
+	}
+	fileV := fileA.View()
+	filePlain := ansi.Strip(fileV.Content)
+	if !strings.Contains(filePlain, "("+data.TypeString.String()+")") {
+		t.Fatalf("file-mode sheet should show the DType inline as (%s):\n%s", data.TypeString.String(), filePlain)
+	}
+}
+
+// filterTestFrame has five fields so the fuzzy filter has a non-trivial
+// match set to assert against.
+func filterTestFrame() *data.Frame {
+	f := data.New("id", "name", "category", "price", "stock")
+	f.AppendRow([]any{"1", "walnut", "snack", "2.50", "42"})
+	return f
+}
+
+func TestSheetMatchedCols(t *testing.T) {
+	f := filterTestFrame()
+	// Empty pattern -> every column index, in order.
+	got := sheetMatchedCols(f, "")
+	want := []int{0, 1, 2, 3, 4}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("empty pattern matched = %v, want %v", got, want)
+	}
+	// "na" fuzzy-matches "name" only (none of id/category/price/stock contain
+	// the subsequence "na" in a fuzzy-friendly way except "name").
+	got = sheetMatchedCols(f, "na")
+	if len(got) != 1 || got[0] != 1 {
+		t.Fatalf("pattern 'na' matched = %v, want [1]", got)
+	}
+	// "sto" matches "stock" (column 4).
+	got = sheetMatchedCols(f, "sto")
+	if len(got) != 1 || got[0] != 4 {
+		t.Fatalf("pattern 'sto' matched = %v, want [4]", got)
+	}
+	// Case-insensitivity: "ID" matches "id".
+	got = sheetMatchedCols(f, "ID")
+	if len(got) != 1 || got[0] != 0 {
+		t.Fatalf("pattern 'ID' matched = %v, want [0]", got)
+	}
+	// A pattern that matches nothing returns an empty slice (not nil-ok).
+	got = sheetMatchedCols(f, "zzz")
+	if len(got) != 0 {
+		t.Fatalf("pattern 'zzz' matched = %v, want []", got)
+	}
+	// Leading/trailing spaces are trimmed.
+	got = sheetMatchedCols(f, "  na  ")
+	if len(got) != 1 || got[0] != 1 {
+		t.Fatalf("pattern '  na  ' matched = %v, want [1]", got)
+	}
+}
+
+func TestRenderSheetFilterNarrowsLeftList(t *testing.T) {
+	f := filterTestFrame()
+	th := theme.Default()
+	// Filter "na" -> only "name" matches; the left list must show "name" and
+	// the cursor marker, and must NOT show "id", "category", "price", "stock".
+	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "na", false, "", th)
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "name") {
+		t.Fatalf("matched key 'name' missing:\n%s", plain)
+	}
+	if !strings.Contains(plain, sheetCursorMark) {
+		t.Fatalf("cursor marker missing on matched field:\n%s", plain)
+	}
+	for _, hidden := range []string{"category", "price", "stock"} {
+		if strings.Contains(plain, hidden) {
+			t.Fatalf("non-matched key %q should not appear:\n%s", hidden, plain)
+		}
+	}
+	// "id" is a substring of "row 1 of 1" / "valid" style strings, so do not
+	// assert against it here; the matched-only key list is covered above.
+
+	// The right pane shows the matched field's value ("walnut").
+	if !strings.Contains(plain, "walnut") {
+		t.Fatalf("matched field value 'walnut' missing from right pane:\n%s", plain)
+	}
+}
+
+func TestRenderSheetFilterNoMatches(t *testing.T) {
+	f := filterTestFrame()
+	th := theme.Default()
+	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "zzz", false, "", th)
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "no matching fields") {
+		t.Fatalf("empty match set should show the placeholder:\n%s", plain)
+	}
+}
+
+func TestRenderSheetFilterLineShown(t *testing.T) {
+	f := filterTestFrame()
+	th := theme.Default()
+	// While filtering with an empty pattern, the placeholder is shown.
+	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", true, "", th)
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "type to filter fields") {
+		t.Fatalf("filter placeholder missing while filtering:\n%s", plain)
+	}
+	// A non-empty, non-filtering pattern still shows the filter line.
+	out = renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "na", false, "", th)
+	plain = ansi.Strip(out)
+	if !strings.Contains(plain, "filter") {
+		t.Fatalf("filter line missing with a set pattern:\n%s", plain)
+	}
+	// No filter line when the pattern is empty and not filtering.
+	out = renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", false, "", th)
+	plain = ansi.Strip(out)
+	if strings.Contains(plain, "type to filter fields") {
+		t.Fatalf("filter placeholder should not show when not filtering:\n%s", plain)
+	}
+}
+
+// TestSheetFilterFlow drives the full app flow: "/" enters filter input, typing
+// narrows the left list, esc clears the filter and exits filter input.
+func TestSheetFilterFlow(t *testing.T) {
+	f := filterTestFrame()
+	a := New(Options{
+		Frames:    []reader.NamedFrame{{Name: "t", Frame: f}},
+		ThemeName: "catppuccin-mocha",
+	})
+	a.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
+	a.Update(key("enter"))
+	p := a.pane()
+	if p.Mode != ModeSheet {
+		t.Fatal("enter should open the sheet")
+	}
+
+	// "/" enters filter input.
+	a.Update(key("/"))
+	if !p.SheetFiltering {
+		t.Fatal("/ should set SheetFiltering")
+	}
+	if len(p.SheetFilter) != 0 {
+		t.Fatalf("SheetFilter should start empty, got %q", string(p.SheetFilter))
+	}
+
+	// Type "na" -> SheetFilter holds the runes and the matched set is just
+	// "name"; SheetField stays 0 (the first match).
+	a.Update(key("n"))
+	a.Update(key("a"))
+	if string(p.SheetFilter) != "na" {
+		t.Fatalf("SheetFilter = %q, want %q", string(p.SheetFilter), "na")
+	}
+	matched := sheetMatchedCols(f, string(p.SheetFilter))
+	if len(matched) != 1 || matched[0] != 1 {
+		t.Fatalf("matched for 'na' = %v, want [1]", matched)
+	}
+	if p.SheetField != 0 {
+		t.Fatalf("SheetField = %d, want 0 (first match)", p.SheetField)
+	}
+	// The rendered sheet must show the filtered key only.
+	view := a.View()
+	plain := ansi.Strip(view.Content)
+	if !strings.Contains(plain, "name") {
+		t.Fatalf("rendered sheet should show the matched 'name' key:\n%s", plain)
+	}
+	for _, hidden := range []string{"category", "price", "stock"} {
+		if strings.Contains(plain, hidden) {
+			t.Fatalf("rendered sheet should hide non-matching key %q:\n%s", hidden, plain)
+		}
+	}
+
+	// esc clears the filter and exits filter input.
+	a.Update(key("esc"))
+	if p.SheetFiltering {
+		t.Fatal("esc should exit filter input")
+	}
+	if len(p.SheetFilter) != 0 {
+		t.Fatalf("esc should clear SheetFilter, got %q", string(p.SheetFilter))
+	}
+	// After clearing, the full key list is back.
+	view = a.View()
+	plain = ansi.Strip(view.Content)
+	if !strings.Contains(plain, "category") {
+		t.Fatalf("after clearing filter the full key list should return:\n%s", plain)
+	}
+}
+
+// TestSheetFilterEnterKeepsFilterApplied asserts that enter exits filter
+// input but leaves the pattern applied, so the user can resume navigation.
+func TestSheetFilterEnterKeepsFilterApplied(t *testing.T) {
+	f := filterTestFrame()
+	a := New(Options{
+		Frames:    []reader.NamedFrame{{Name: "t", Frame: f}},
+		ThemeName: "catppuccin-mocha",
+	})
+	a.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
+	a.Update(key("enter"))
+	a.Update(key("/"))
+	a.Update(key("n"))
+	a.Update(key("a"))
+
+	a.Update(key("enter"))
+	p := a.pane()
+	if p.SheetFiltering {
+		t.Fatal("enter should exit filter input")
+	}
+	if string(p.SheetFilter) != "na" {
+		t.Fatalf("enter should keep the filter applied, got %q", string(p.SheetFilter))
+	}
+	// j moves within the matched set (still length 1), so the cursor stays.
+	a.Update(key("j"))
+	if p.SheetField != 0 {
+		t.Fatalf("j within a single-match filter should keep cursor at 0, got %d", p.SheetField)
+	}
+}
+
+// TestSheetFilterBackspaceAndCtrlU asserts backspace pops a rune and ctrl+u
+// clears the buffer, each time re-clamping the cursor to the matched set.
+func TestSheetFilterBackspaceAndCtrlU(t *testing.T) {
+	f := filterTestFrame()
+	a := New(Options{
+		Frames:    []reader.NamedFrame{{Name: "t", Frame: f}},
+		ThemeName: "catppuccin-mocha",
+	})
+	a.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
+	a.Update(key("enter"))
+	a.Update(key("/"))
+	a.Update(key("n"))
+	a.Update(key("a"))
+	p := a.pane()
+	if string(p.SheetFilter) != "na" {
+		t.Fatalf("SheetFilter = %q, want na", string(p.SheetFilter))
+	}
+	// backspace -> "n", which matches "name" still.
+	a.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if string(p.SheetFilter) != "n" {
+		t.Fatalf("after backspace SheetFilter = %q, want n", string(p.SheetFilter))
+	}
+	matched := sheetMatchedCols(f, string(p.SheetFilter))
+	if len(matched) != 1 || matched[0] != 1 {
+		t.Fatalf("matched for 'n' = %v, want [1]", matched)
+	}
+	// ctrl+u clears the buffer -> empty pattern matches all columns.
+	a.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if string(p.SheetFilter) != "" {
+		t.Fatalf("ctrl+u should clear SheetFilter, got %q", string(p.SheetFilter))
+	}
+	matched = sheetMatchedCols(f, string(p.SheetFilter))
+	if len(matched) != f.NumCols() {
+		t.Fatalf("after ctrl+u matched = %d cols, want %d", len(matched), f.NumCols())
+	}
+}
+

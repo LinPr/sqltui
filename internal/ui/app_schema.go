@@ -24,11 +24,12 @@ var completionCaches sync.Map // *App -> *schemaCache
 // resetting the entry, so no explicit invalidation hook is needed.
 type schemaCache struct {
 	mu      sync.Mutex
-	backend db.Backend          // connection the snapshot belongs to
-	listed  bool                // namespace/table listing completed
-	ns      map[string]string   // table -> namespace (for column fetches)
-	cols    map[string][]string // table -> columns (nil until fetched)
-	fetched map[string]bool     // column fetch attempted (even if empty)
+	backend db.Backend            // connection the snapshot belongs to
+	listed  bool                  // namespace/table listing completed
+	ns      map[string]string     // table -> namespace (for column fetches)
+	cols    map[string][]string   // table -> columns (nil until fetched)
+	meta    map[string][]db.ColumnMeta // table -> full column metadata
+	fetched map[string]bool       // column fetch attempted (even if empty)
 }
 
 // completionCache returns the app's cache entry, creating it on first use.
@@ -50,6 +51,7 @@ func (c *schemaCache) resetFor(be db.Backend) {
 	c.listed = false
 	c.ns = make(map[string]string)
 	c.cols = make(map[string][]string)
+	c.meta = make(map[string][]db.ColumnMeta)
 	c.fetched = make(map[string]bool)
 }
 
@@ -144,8 +146,19 @@ func (a *App) WarmCompletionSchema(tables ...string) {
 			continue
 		}
 
+		// Prefer the richer ColumnsMeta call: it yields both the column
+		// names and the full metadata the sheet type line consumes. Only when
+		// the engine can't describe the table do we fall back to a 1-row
+		// FetchTable for the names alone (meta stays nil).
 		var cols []string
-		if f, err := be.FetchTable(nsName, t, 1); err == nil && f != nil {
+		var meta []db.ColumnMeta
+		if cm, err := be.ColumnsMeta(nsName, t); err == nil && cm != nil {
+			cols = make([]string, len(cm))
+			for i, m := range cm {
+				cols[i] = m.Name
+			}
+			meta = cm
+		} else if f, err := be.FetchTable(nsName, t, 1); err == nil && f != nil {
 			cols = f.ColumnNames()
 		}
 
@@ -153,7 +166,64 @@ func (a *App) WarmCompletionSchema(tables ...string) {
 		if c.backend == be {
 			c.fetched[t] = true
 			c.cols[t] = cols
+			c.meta[t] = meta
 		}
 		c.mu.Unlock()
 	}
+}
+
+// columnMetaFor returns the cached full column metadata for table, or nil when
+// no snapshot is available for the current connection (file mode, a table the
+// cache hasn't warmed, or a backend whose ColumnsMeta errored). The caller is
+// expected to degrade gracefully.
+func (a *App) columnMetaFor(table string) []db.ColumnMeta {
+	c := a.completionCache()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.backend == a.backend {
+		return c.meta[table]
+	}
+	return nil
+}
+
+// cursorFieldMeta resolves the metadata of the active sheet field for the type
+// line. It looks up the cached column metadata for the current pane's table
+// and matches the column NAME at the cursor index (the frame's column order
+// need not match the engine's ordinal order). When no meta is available (file
+// mode, a not-yet-warmed table, or a nil pane/frame) it falls back to the
+// frame DType string for dataType and empty strings for the rest.
+func (a *App) cursorFieldMeta() (dataType, notNull, defaultVal, comment string) {
+	p := a.pane()
+	if p == nil {
+		return "", "", "", ""
+	}
+	f := p.Current()
+	if f == nil {
+		return "", "", "", ""
+	}
+	// When a sheet field filter is active, SheetField is an index into the
+	// matched column list, not a raw column index. Resolve the real column
+	// via the matched set so the type/metadata matches the field under the
+	// cursor.
+	field := clamp(p.SheetField, 0, f.NumCols()-1)
+	if matched := sheetMatchedCols(f, string(p.SheetFilter)); len(matched) > 0 {
+		idx := clamp(p.SheetField, 0, len(matched)-1)
+		field = matched[idx]
+	}
+	name := f.Columns[field].Name
+
+	if meta := a.columnMetaFor(p.Title); meta != nil {
+		for _, m := range meta {
+			if m.Name == name {
+				dataType = m.DataType
+				notNull = m.IsNullable
+				defaultVal = m.Default
+				comment = m.Comment
+				return
+			}
+		}
+	}
+	// Fall back to the frame's own DType.
+	dataType = f.Columns[field].Type.String()
+	return
 }
