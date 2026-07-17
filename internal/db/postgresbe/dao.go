@@ -265,6 +265,54 @@ func (db *DB) ColumnsMeta(schema, table string) ([]dbapi.ColumnMeta, error) {
 	return cols, rows.Err()
 }
 
+// ColumnIndexTypes returns a column→index-type map for schema.table.
+// Priority: PK > UNIQUE > INDEX.
+func (db *DB) ColumnIndexTypes(schema, table string) (map[string]string, error) {
+	if db.DB == nil {
+		return nil, fmt.Errorf("postgres connection is not open")
+	}
+	query := `SELECT a.attname,
+		CASE WHEN ix.indisprimary THEN 'PK'
+		     WHEN ix.indisunique THEN 'UNIQUE'
+		     ELSE 'INDEX' END AS index_type
+	FROM pg_class t
+	JOIN pg_index ix ON t.oid = ix.indrelid
+	JOIN pg_class i ON i.oid = ix.indexrelid
+	JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+	WHERE t.relname = $1
+	  AND t.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = $2)
+	ORDER BY ix.indisprimary DESC, ix.indisunique DESC`
+	rows, err := db.Query(query, table, schema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var colName, label string
+		if err := rows.Scan(&colName, &label); err != nil {
+			return nil, err
+		}
+		if existing, ok := result[colName]; !ok || indexPriority(existing) < indexPriority(label) {
+			result[colName] = label
+		}
+	}
+	return result, rows.Err()
+}
+
+func indexPriority(label string) int {
+	switch label {
+	case "PK":
+		return 3
+	case "UNIQUE":
+		return 2
+	case "INDEX":
+		return 1
+	}
+	return 0
+}
+
 func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }

@@ -214,9 +214,10 @@ func (b *errConfirmBackend) Run(string) (db.Result, error)                      
 func (b *errConfirmBackend) Namespaces() ([]string, error)                       { return nil, nil }
 func (b *errConfirmBackend) Tables(string) ([]string, error)                     { return nil, nil }
 func (b *errConfirmBackend) FetchTable(string, string, int) (*data.Frame, error) { return nil, nil }
-func (b *errConfirmBackend) PrimaryKeys(string, string) ([]string, error)        { return nil, nil }
-func (b *errConfirmBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
-func (b *errConfirmBackend) Close() error                                        { return nil }
+func (b *errConfirmBackend) PrimaryKeys(string, string) ([]string, error)                    { return nil, nil }
+func (b *errConfirmBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)             { return nil, nil }
+func (b *errConfirmBackend) ColumnIndexTypes(string, string) (map[string]string, error)      { return nil, nil }
+func (b *errConfirmBackend) Close() error                                                    { return nil }
 
 func TestConfirmSaveOverlayInterface(t *testing.T) {
 	var _ ui.Overlay = (*confirmSaveOverlay)(nil)

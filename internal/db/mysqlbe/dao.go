@@ -306,6 +306,58 @@ func (db *DB) ColumnsMeta(database, table string) ([]dbapi.ColumnMeta, error) {
 	return cols, rows.Err()
 }
 
+// ColumnIndexTypes returns a column→index-type map for database.table.
+// Priority: PK > UNIQUE > INDEX. Columns not in any index are absent from the map.
+func (db *DB) ColumnIndexTypes(database, table string) (map[string]string, error) {
+	if db.DB == nil {
+		return nil, fmt.Errorf("mysql connection is not open")
+	}
+	if database == "" {
+		database = db.dbName
+	}
+	query := `SELECT column_name, index_name, non_unique
+		FROM information_schema.statistics
+		WHERE table_schema = ? AND table_name = ?
+		ORDER BY CASE WHEN index_name = 'PRIMARY' THEN 0 WHEN non_unique = 0 THEN 1 ELSE 2 END, seq_in_index`
+	rows, err := db.Query(query, database, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var colName, indexName string
+		var nonUnique int
+		if err := rows.Scan(&colName, &indexName, &nonUnique); err != nil {
+			return nil, err
+		}
+		label := "INDEX"
+		if indexName == "PRIMARY" {
+			label = "PK"
+		} else if nonUnique == 0 {
+			label = "UNIQUE"
+		}
+		// Only set if not already set by a higher-priority index
+		if existing, ok := result[colName]; !ok || indexPriority(existing) < indexPriority(label) {
+			result[colName] = label
+		}
+	}
+	return result, rows.Err()
+}
+
+func indexPriority(label string) int {
+	switch label {
+	case "PK":
+		return 3
+	case "UNIQUE":
+		return 2
+	case "INDEX":
+		return 1
+	}
+	return 0
+}
+
 // quoteIdent quotes a mysql identifier with backticks, doubling any
 // embedded backtick.
 func quoteIdent(name string) string {

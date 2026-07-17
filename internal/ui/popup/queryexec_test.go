@@ -64,9 +64,10 @@ func (b *qxFakeBackend) Tables(string) ([]string, error) { return nil, nil }
 func (b *qxFakeBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, nil
 }
-func (b *qxFakeBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
-func (b *qxFakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
-func (b *qxFakeBackend) Close() error                                  { return nil }
+func (b *qxFakeBackend) PrimaryKeys(string, string) ([]string, error)                { return nil, nil }
+func (b *qxFakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)         { return nil, nil }
+func (b *qxFakeBackend) ColumnIndexTypes(string, string) (map[string]string, error)  { return nil, nil }
+func (b *qxFakeBackend) Close() error                                                { return nil }
 
 // qxTestFrame builds a two-column frame: name (str) and age (i64).
 func qxTestFrame() *data.Frame {

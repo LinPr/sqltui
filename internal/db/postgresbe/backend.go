@@ -127,6 +127,11 @@ func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) 
 	return b.db.ColumnsMeta(namespace, table)
 }
 
+// ColumnIndexTypes returns index type labels for indexed columns of namespace.table.
+func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, error) {
+	return b.db.ColumnIndexTypes(namespace, table)
+}
+
 func (b *Backend) Close() error {
 	return b.db.Close()
 }

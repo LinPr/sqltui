@@ -253,6 +253,77 @@ func (db *DB) ColumnsMeta(table string) ([]dbapi.ColumnMeta, error) {
 	return cols, nil
 }
 
+// ColumnIndexTypes returns a column→index-type map for table.
+// Priority: PK > UNIQUE > INDEX.
+// SQLite uses PRAGMA table_info for PKs and PRAGMA index_list + index_info for other indexes.
+func (db *DB) ColumnIndexTypes(table string) (map[string]string, error) {
+	result := make(map[string]string)
+
+	// Primary keys from pragma_table_info
+	pkQuery := fmt.Sprintf("SELECT name FROM pragma_table_info(%s) WHERE pk > 0", quoteString(table))
+	_, pkRecords, err := db.RawQuery(pkQuery)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range pkRecords {
+		if len(r) > 0 {
+			result[r[0]] = "PK"
+		}
+	}
+
+	// Other indexes from index_list + index_info
+	listQuery := fmt.Sprintf("PRAGMA index_list(%s)", quoteIdentifier(table))
+	_, idxList, err := db.RawQuery(listQuery)
+	if err != nil {
+		return result, nil // silently degrade if pragma fails
+	}
+	// index_list columns: seq, name, unique, origin, partial
+	for _, idx := range idxList {
+		if len(idx) < 4 {
+			continue
+		}
+		idxName := idx[1]
+		isUnique := idx[2] == "1"
+		origin := idx[3] // 'pk', 'u', 'c'
+		if origin == "pk" {
+			continue // already captured above
+		}
+		label := "INDEX"
+		if isUnique {
+			label = "UNIQUE"
+		}
+
+		infoQuery := fmt.Sprintf("PRAGMA index_info(%s)", quoteIdentifier(idxName))
+		_, infoRecords, err := db.RawQuery(infoQuery)
+		if err != nil {
+			continue
+		}
+		// index_info columns: seqno, cid, name
+		for _, col := range infoRecords {
+			if len(col) < 3 {
+				continue
+			}
+			colName := col[2]
+			if existing, ok := result[colName]; !ok || indexPriority(existing) < indexPriority(label) {
+				result[colName] = label
+			}
+		}
+	}
+	return result, nil
+}
+
+func indexPriority(label string) int {
+	switch label {
+	case "PK":
+		return 3
+	case "UNIQUE":
+		return 2
+	case "INDEX":
+		return 1
+	}
+	return 0
+}
+
 func (db *DB) Close() error {
 	return db.DB.Close()
 }

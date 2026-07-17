@@ -99,9 +99,10 @@ func (f *fakeBackend) FetchTable(ns, table string, limit int) (*data.Frame, erro
 	f.fetchNS, f.fetchTable, f.fetchLimit = ns, table, limit
 	return f.frame, f.fetchErr
 }
-func (f *fakeBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
-func (f *fakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
-func (f *fakeBackend) Close() error                                  { return nil }
+func (f *fakeBackend) PrimaryKeys(string, string) ([]string, error)                { return nil, nil }
+func (f *fakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)         { return nil, nil }
+func (f *fakeBackend) ColumnIndexTypes(string, string) (map[string]string, error)  { return nil, nil }
+func (f *fakeBackend) Close() error                                                { return nil }
 
 // fakeKV is a db.KVBackend stub for redis-mode tests.
 type fakeKV struct {

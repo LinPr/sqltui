@@ -25,20 +25,21 @@ func init() {
 
 // infoColRow is one precomputed line of the per-column mini table.
 type infoColRow struct {
-	Name    string
-	Type    string
-	NotNull string
-	Default string
-	Comment string
+	Name      string
+	Type      string
+	NotNull   string
+	Default   string
+	IndexType string
 }
 
 // columnsMetaMsg carries the async column-metadata result back to the overlay
 // that issued the fetch. The owner pointer lets stale messages from a prior
 // instance be ignored.
 type columnsMetaMsg struct {
-	owner *infoOverlay
-	meta  []db.ColumnMeta
-	err   error
+	owner   *infoOverlay
+	meta    []db.ColumnMeta
+	indexes map[string]string
+	err     error
 }
 
 // infoOverlay shows metadata about the current frame: title, breadcrumb,
@@ -50,6 +51,7 @@ type infoOverlay struct {
 	frame    *data.Frame
 	loading  bool
 	meta     []db.ColumnMeta
+	indexes  map[string]string
 	loadErr  string
 
 	title  string
@@ -96,16 +98,20 @@ func infoRowsFromFrame(f *data.Frame) []infoColRow {
 }
 
 // infoRowsFromMeta rebuilds the listing from live column metadata.
-func infoRowsFromMeta(meta []db.ColumnMeta) []infoColRow {
+func infoRowsFromMeta(meta []db.ColumnMeta, indexes map[string]string) []infoColRow {
 	rows := make([]infoColRow, 0, len(meta))
 	for i := range meta {
 		m := &meta[i]
+		indexType := ""
+		if indexes != nil {
+			indexType = indexes[m.Name]
+		}
 		rows = append(rows, infoColRow{
-			Name:    m.Name,
-			Type:    m.DataType,
-			NotNull: m.IsNullable,
-			Default: m.Default,
-			Comment: m.Comment,
+			Name:      m.Name,
+			Type:      m.DataType,
+			NotNull:   m.IsNullable,
+			Default:   m.Default,
+			IndexType: indexType,
 		})
 	}
 	return rows
@@ -123,7 +129,8 @@ func (o *infoOverlay) Init() tea.Cmd {
 	owner := o
 	return func() tea.Msg {
 		m, err := be.ColumnsMeta(ns, table)
-		return columnsMetaMsg{owner: owner, meta: m, err: err}
+		indexes, _ := be.ColumnIndexTypes(ns, table)
+		return columnsMetaMsg{owner: owner, meta: m, indexes: indexes, err: err}
 	}
 }
 
@@ -134,7 +141,8 @@ func (o *infoOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 			o.loadErr = m.err.Error()
 		} else {
 			o.meta = m.meta
-			o.list = infoRowsFromMeta(m.meta)
+			o.indexes = m.indexes
+			o.list = infoRowsFromMeta(m.meta, m.indexes)
 		}
 		o.offset = 0
 		return o, nil
@@ -179,9 +187,9 @@ func (o *infoOverlay) View(width, height int, th *theme.Theme) string {
 	lines = append(lines, label("size: ", infoHumanSize(o.size)))
 	lines = append(lines, "")
 
-	// Mini table geometry: name | type | not null | default | comment.
+	// Mini table geometry: name | type | not_null | default | index.
 	const nameCap = 24
-	typeW, nullW, defaultW := 12, 8, 14
+	typeW, nullW, defaultW, indexW := 12, 8, 10, 6
 	nameW := 8
 	for _, r := range o.list {
 		if w := len(r.Name); w > nameW {
@@ -191,12 +199,8 @@ func (o *infoOverlay) View(width, height int, th *theme.Theme) string {
 	if nameW > nameCap {
 		nameW = nameCap
 	}
-	commentW := inner - nameW - typeW - nullW - defaultW - 6
-	if commentW < 6 {
-		commentW = 6
-	}
 	header := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s ",
-		nameW, "column", typeW, "type", nullW, "not null", defaultW, "default", commentW, "comment")
+		nameW, "column", typeW, "type", nullW, "not_null", defaultW, "default", indexW, "index")
 	lines = append(lines, th.Header.Render(ansi.Truncate(header, inner, "…")))
 
 	// How many list rows fit: full height minus borders (2) and header lines.
@@ -219,11 +223,18 @@ func (o *infoOverlay) View(width, height int, th *theme.Theme) string {
 		for i := o.offset; i < o.offset+o.viewRows && i < len(o.list); i++ {
 			r := o.list[i]
 			name := ansi.Truncate(r.Name, nameW, "…")
+			notNullDisplay := r.NotNull
+			switch r.NotNull {
+			case "YES":
+				notNullDisplay = "✗"
+			case "NO":
+				notNullDisplay = "√"
+			}
 			row := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s ",
 				nameW, name, typeW, ansi.Truncate(r.Type, typeW, "…"),
-				nullW, ansi.Truncate(r.NotNull, nullW, "…"),
+				nullW, notNullDisplay,
 				defaultW, ansi.Truncate(r.Default, defaultW, "…"),
-				commentW, ansi.Truncate(r.Comment, commentW, "…"))
+				indexW, ansi.Truncate(r.IndexType, indexW, "…"))
 			lines = append(lines, th.Text.Render(ansi.Truncate(row, inner, "…")))
 		}
 	}

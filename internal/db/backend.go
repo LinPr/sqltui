@@ -54,6 +54,11 @@ type Backend interface {
 	// ColumnsMeta returns column metadata for namespace.table, in ordinal
 	// order. Engines without namespaces ignore namespace.
 	ColumnsMeta(namespace, table string) ([]ColumnMeta, error)
+	// ColumnIndexTypes returns a map of column name → index type label for each
+	// indexed column in namespace.table. Labels are "PK", "UNIQUE", or "INDEX"
+	// (highest priority wins when a column appears in multiple indexes).
+	// Returns an empty map (not an error) when the table has no indexes.
+	ColumnIndexTypes(namespace, table string) (map[string]string, error)
 	Close() error
 }
 

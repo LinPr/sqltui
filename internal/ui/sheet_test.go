@@ -37,15 +37,14 @@ func longKeyFrame() *data.Frame {
 
 func TestSheetTableGeometry(t *testing.T) {
 	f := sheetTestFrame()
-	// Names are id/name/comment/notes; the key cell reserves a two-cell marker
-	// prefix, so the longest key cell is "comment" (7) + 2 = 9. At inner=40
-	// the cap of 20 keeps the natural 9.
+	// Names are id/name/comment/notes; the longest key name is "comment" (7).
+	// At inner=40 the cap of 20 keeps the natural 7.
 	keyW, valW := sheetTableGeometry(f, 40)
-	if keyW != 9 {
-		t.Fatalf("keyW = %d, want 9", keyW)
+	if keyW != 7 {
+		t.Fatalf("keyW = %d, want 7", keyW)
 	}
-	if valW != 40-9-1 {
-		t.Fatalf("valW = %d, want %d", valW, 40-9-1)
+	if valW != 40-7-1 {
+		t.Fatalf("valW = %d, want %d", valW, 40-7-1)
 	}
 	// A very long key name does NOT widen keyW past 20.
 	lf := longKeyFrame()
@@ -88,10 +87,10 @@ func TestSheetKeyEntryHeightAndOffsets(t *testing.T) {
 func TestSheetKeyEntryHeightWrapsLongName(t *testing.T) {
 	f := longKeyFrame()
 	const keyW = 20
-	// Field 1's name is 44 chars; avail = keyW-2 = 18, so it wraps to 3 lines
-	// (44 / 18 = 2.44 -> ceil 3).
+	// Field 1's name is 44 chars; avail = keyW = 20, so it wraps to 3 lines
+	// (44 / 20 = 2.2 -> ceil 3).
 	h := sheetKeyEntryHeight(f, 1, keyW)
-	wrapped := ansi.Wrap(f.Columns[1].Name, keyW-2, "")
+	wrapped := ansi.Wrap(f.Columns[1].Name, keyW, "")
 	want := strings.Count(wrapped, "\n") + 1
 	if h != want {
 		t.Fatalf("wrapped entry height = %d, want %d", h, want)
@@ -139,7 +138,7 @@ func TestSheetValueLineCount(t *testing.T) {
 func TestRenderSheetKeyListAndSeparator(t *testing.T) {
 	f := sheetTestFrame()
 	th := theme.Default()
-	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", false, "", th)
+	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", false, th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "│") {
 		t.Fatalf("separator missing:\n%s", plain)
@@ -147,8 +146,8 @@ func TestRenderSheetKeyListAndSeparator(t *testing.T) {
 	if !strings.Contains(plain, "Key") || !strings.Contains(plain, "Value") {
 		t.Fatalf("column header missing:\n%s", plain)
 	}
-	if !strings.Contains(plain, sheetCursorMark) {
-		t.Fatalf("cursor marker missing on field 0:\n%s", plain)
+	if !strings.Contains(plain, "id") {
+		t.Fatalf("cursor field key 'id' missing from output:\n%s", plain)
 	}
 	// The cursor field key (id) should appear in the rendered output.
 	if !strings.Contains(plain, "id") {
@@ -159,31 +158,41 @@ func TestRenderSheetKeyListAndSeparator(t *testing.T) {
 func TestRenderSheetShowsOnlyCursorFieldValue(t *testing.T) {
 	f := sheetTestFrame()
 	th := theme.Default()
-	// Cursor on field 2 (comment). The right pane must show the comment
-	// value but NOT the name value.
-	out := renderSheet(f, 0, 0, 40, 8, 2, false, nil, 0, 0, "", false, "", th)
+	// Cursor on field 2 (comment). The cursor row must show the comment value
+	// in the expanded right pane (with separator). Non-cursor rows show compact
+	// key: value lines, so "alice" is visible in the compact name row.
+	out := renderSheet(f, 0, 0, 40, 8, 2, false, nil, 0, 0, "", false, th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "a longer comment cell") {
 		t.Fatalf("cursor field value missing from right pane:\n%s", plain)
 	}
-	if strings.Contains(plain, "alice") {
-		t.Fatalf("non-cursor field value 'alice' must not appear in master-detail right pane:\n%s", plain)
+	// The cursor row must have the separator (expanded layout).
+	lines := strings.Split(plain, "\n")
+	cursorRowOK := false
+	for _, l := range lines {
+		if strings.Contains(l, "comment") && strings.Contains(l, "│") {
+			cursorRowOK = true
+			break
+		}
+	}
+	if !cursorRowOK {
+		t.Fatalf("cursor row (comment + separator) not found:\n%s", plain)
 	}
 }
 
 func TestRenderSheetLongKeyWraps(t *testing.T) {
 	f := longKeyFrame()
 	th := theme.Default()
-	out := renderSheet(f, 0, 0, 50, 10, 1, false, nil, 0, 0, "", false, "", th)
+	out := renderSheet(f, 0, 0, 50, 10, 1, false, nil, 0, 0, "", false, th)
 	plain := ansi.Strip(out)
 	// The wrapped key name should appear (at least the first fragment). The
 	// keyW cap is 20, so the name is truncated to fit on the first line.
 	if !strings.Contains(plain, "this_is_a_very_lon") {
 		t.Fatalf("wrapped key name fragment missing:\n%s", plain)
 	}
-	// The cursor marker should be on field 1's first wrapped line.
-	if !strings.Contains(plain, sheetCursorMark) {
-		t.Fatalf("cursor marker missing:\n%s", plain)
+	// The cursor row (field 1) should use full-row highlight; the value must be visible in right pane.
+	if !strings.Contains(plain, "│") {
+		t.Fatalf("cursor marker (separator) missing:\n%s", plain)
 	}
 }
 
@@ -197,7 +206,7 @@ func TestRenderSheetEdgeFollow(t *testing.T) {
 	const inner, height = 40, 5
 	lastField := f.NumCols() - 1
 	keyW, _ := sheetTableGeometry(f, inner)
-	visible := height - 2
+	visible := height - 3 // 2 headers + 1 footer hint
 	curStart := sheetKeyLineOffset(f, lastField, keyW)
 	curEnd := curStart + sheetKeyEntryHeight(f, lastField, keyW) - 1
 	off := curEnd - visible + 1
@@ -207,13 +216,14 @@ func TestRenderSheetEdgeFollow(t *testing.T) {
 	maxOff := max(0, sheetKeyLineCount(f, keyW)-visible)
 	off = clamp(off, 0, maxOff)
 
-	out := renderSheet(f, 0, off, inner, height, lastField, false, nil, 0, 0, "", false, "", th)
+	out := renderSheet(f, 0, off, inner, height, lastField, false, nil, 0, 0, "", false, th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "notes") {
 		t.Fatalf("cursor field 'notes' should be visible under edge-follow:\n%s", plain)
 	}
-	if !strings.Contains(plain, sheetCursorMark) {
-		t.Fatalf("cursor marker missing:\n%s", plain)
+	// The cursor row must include the separator (expanded layout).
+	if !strings.Contains(plain, "│") {
+		t.Fatalf("cursor row separator missing:\n%s", plain)
 	}
 }
 
@@ -222,7 +232,7 @@ func TestRenderSheetEditMode(t *testing.T) {
 	th := theme.Default()
 	// Edit the id field; the edit runes should appear in the rendered output.
 	editRunes := []rune("99")
-	out := renderSheet(f, 0, 0, 40, 6, 0, true, editRunes, 2, 0, "", false, "", th)
+	out := renderSheet(f, 0, 0, 40, 6, 0, true, editRunes, 2, 0, "", false, th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "99") {
 		t.Fatalf("edit runes missing from right pane:\n%s", plain)
@@ -234,8 +244,8 @@ func TestRenderSheetEditMode(t *testing.T) {
 	lines := strings.Split(plain, "\n")
 	found99 := false
 	for _, l := range lines {
-		// The value row is the one starting with the cursor marker.
-		if strings.Contains(l, sheetCursorMark) && strings.Contains(l, "99") {
+		// The expanded cursor row has the separator and the edit runes.
+		if strings.Contains(l, "│") && strings.Contains(l, "99") {
 			found99 = true
 			if strings.Contains(l, " 1 ") {
 				t.Fatalf("static value '1' should be replaced by edit runes on cursor row:\n%s", plain)
@@ -387,45 +397,6 @@ func (b *metaBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) {
 	return b.meta, nil
 }
 
-// TestRenderSheetInlineTypeTag asserts that a non-empty fieldType is appended
-// as a " (type)" suffix to the first value line, inline with the value (not a
-// separate reserved line). The tag is suppressed while editing.
-func TestRenderSheetInlineTypeTag(t *testing.T) {
-	f := sheetTestFrame()
-	th := theme.Default()
-	out := renderSheet(f, 0, 0, 40, 6, 0, false, nil, 0, 0, "", false, "int", th)
-	plain := ansi.Strip(out)
-
-	lines := strings.Split(plain, "\n")
-	// Lines: 0 = "row N of M" header, 1 = "Key|Value" col header, 2 = first
-	// body line whose right cell is the cursor field value with the type tag.
-	if len(lines) < 3 {
-		t.Fatalf("expected at least 3 lines, got %d:\n%s", len(lines), plain)
-	}
-	if !strings.Contains(lines[2], "(int)") {
-		t.Fatalf("first body line should contain the inline type tag, got %q:\n%s", lines[2], plain)
-	}
-	// The cursor field value "1" (id field) and the tag share the same line.
-	if !strings.Contains(lines[2], "1") {
-		t.Fatalf("first body line should contain the cursor value, got %q:\n%s", lines[2], plain)
-	}
-
-	// While editing, the type tag must NOT appear (the block cursor stays clean).
-	editOut := renderSheet(f, 0, 0, 40, 6, 0, true, []rune("99"), 2, 0, "", false, "int", th)
-	editPlain := ansi.Strip(editOut)
-	for _, l := range strings.Split(editPlain, "\n") {
-		if strings.Contains(l, "(int)") {
-			t.Fatalf("type tag must be suppressed while editing, found in line %q:\n%s", l, editPlain)
-		}
-	}
-
-	// An empty fieldType renders no tag at all.
-	plainOut := renderSheet(f, 0, 0, 40, 6, 0, false, nil, 0, 0, "", false, "", th)
-	plainPlain := ansi.Strip(plainOut)
-	if strings.Contains(plainPlain, "(int)") {
-		t.Fatalf("empty fieldType must not render a tag:\n%s", plainPlain)
-	}
-}
 
 // TestCursorFieldMetaDBAndFileMode asserts cursorFieldMeta resolves the
 // cached engine metadata in db mode, and falls back to the frame DType in
@@ -537,14 +508,16 @@ func TestSheetWarmsColumnMetaAndShowsRealType(t *testing.T) {
 	}
 	a.Update(msg)
 
-	// Now the cache is warm; the sheet view must show the real type inline.
+	// Now the cache is warm; cursorFieldType should return the real engine type.
 	if got := a.cursorFieldType(); got != "int" {
 		t.Fatalf("cursorFieldType after warm = %q, want int", got)
 	}
+	// The type is no longer shown inline in the sheet view (it appears only in
+	// the drawer header when pressing e). Just ensure the sheet renders without error.
 	v := a.View()
 	plain := ansi.Strip(v.Content)
-	if !strings.Contains(plain, "(int)") {
-		t.Fatalf("sheet view should show the real type inline as (int):\n%s", plain)
+	if !strings.Contains(plain, "id") {
+		t.Fatalf("sheet view missing field 'id':\n%s", plain)
 	}
 
 	// File mode: no backend -> ActSheet returns nil cmd and the view shows the
@@ -560,11 +533,7 @@ func TestSheetWarmsColumnMetaAndShowsRealType(t *testing.T) {
 	if got := fileA.cursorFieldType(); got != data.TypeString.String() {
 		t.Fatalf("file-mode cursorFieldType = %q, want %q", got, data.TypeString.String())
 	}
-	fileV := fileA.View()
-	filePlain := ansi.Strip(fileV.Content)
-	if !strings.Contains(filePlain, "("+data.TypeString.String()+")") {
-		t.Fatalf("file-mode sheet should show the DType inline as (%s):\n%s", data.TypeString.String(), filePlain)
-	}
+	// Type is no longer shown inline in sheet view (drawer only).
 }
 
 // filterTestFrame has five fields so the fuzzy filter has a non-trivial
@@ -616,13 +585,14 @@ func TestRenderSheetFilterNarrowsLeftList(t *testing.T) {
 	th := theme.Default()
 	// Filter "na" -> only "name" matches; the left list must show "name" and
 	// the cursor marker, and must NOT show "id", "category", "price", "stock".
-	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "na", false, "", th)
+	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "na", false, th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "name") {
 		t.Fatalf("matched key 'name' missing:\n%s", plain)
 	}
-	if !strings.Contains(plain, sheetCursorMark) {
-		t.Fatalf("cursor marker missing on matched field:\n%s", plain)
+	// The cursor row must be the expanded layout (has separator).
+	if !strings.Contains(plain, "│") {
+		t.Fatalf("cursor row separator missing on matched field:\n%s", plain)
 	}
 	for _, hidden := range []string{"category", "price", "stock"} {
 		if strings.Contains(plain, hidden) {
@@ -641,7 +611,7 @@ func TestRenderSheetFilterNarrowsLeftList(t *testing.T) {
 func TestRenderSheetFilterNoMatches(t *testing.T) {
 	f := filterTestFrame()
 	th := theme.Default()
-	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "zzz", false, "", th)
+	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "zzz", false, th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "no matching fields") {
 		t.Fatalf("empty match set should show the placeholder:\n%s", plain)
@@ -652,19 +622,19 @@ func TestRenderSheetFilterLineShown(t *testing.T) {
 	f := filterTestFrame()
 	th := theme.Default()
 	// While filtering with an empty pattern, the placeholder is shown.
-	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", true, "", th)
+	out := renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", true, th)
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "type to filter fields") {
 		t.Fatalf("filter placeholder missing while filtering:\n%s", plain)
 	}
 	// A non-empty, non-filtering pattern still shows the filter line.
-	out = renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "na", false, "", th)
+	out = renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "na", false, th)
 	plain = ansi.Strip(out)
 	if !strings.Contains(plain, "filter") {
 		t.Fatalf("filter line missing with a set pattern:\n%s", plain)
 	}
 	// No filter line when the pattern is empty and not filtering.
-	out = renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", false, "", th)
+	out = renderSheet(f, 0, 0, 40, 8, 0, false, nil, 0, 0, "", false, th)
 	plain = ansi.Strip(out)
 	if strings.Contains(plain, "type to filter fields") {
 		t.Fatalf("filter placeholder should not show when not filtering:\n%s", plain)

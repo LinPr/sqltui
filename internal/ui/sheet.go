@@ -15,9 +15,6 @@ import (
 // sheetSepChar is the vertical bar drawn between the key and value columns.
 const sheetSepChar = "│"
 
-// sheetCursorMark prefixes the key cell of the cursored field.
-const sheetCursorMark = "▶"
-
 // sheetSanitize normalizes carriage returns so a raw \r never reaches the
 // terminal (it would return the cursor to column 0 and overwrite the line)
 // and so ansi.Wrap's width accounting stays correct. The wrap helpers below
@@ -37,11 +34,10 @@ func sheetTableGeometry(f *data.Frame, inner int) (keyW, valW int) {
 		inner = 1
 	}
 	const hi = 20
-	const markW = 2 // sheetCursorMark + space, or the two-space indent
 	keyW = 4
 	if f != nil {
 		for _, c := range f.Columns {
-			if w := ansi.StringWidth(c.Name) + markW; w > keyW {
+			if w := ansi.StringWidth(c.Name); w > keyW {
 				keyW = w
 			}
 		}
@@ -60,18 +56,12 @@ func sheetTableGeometry(f *data.Frame, inner int) (keyW, valW int) {
 }
 
 // sheetKeyEntryHeight reports the wrapped line count of one key entry in the
-// left list. The key name is wrapped to keyW-markW (the space left after the
-// two-cell marker prefix); it is always at least 1.
+// left list. The key name is wrapped to keyW; it is always at least 1.
 func sheetKeyEntryHeight(f *data.Frame, field, keyW int) int {
 	if f == nil || field < 0 || field >= f.NumCols() {
 		return 1
 	}
-	const markW = 2
-	avail := keyW - markW
-	if avail < 1 {
-		avail = 1
-	}
-	wrapped := ansi.Wrap(sheetSanitize(f.Columns[field].Name), avail, "")
+	wrapped := ansi.Wrap(sheetSanitize(f.Columns[field].Name), keyW, "")
 	return strings.Count(wrapped, "\n") + 1
 }
 
@@ -185,32 +175,22 @@ func sheetKeyLineCountCols(f *data.Frame, cols []int, keyW int) int {
 
 // sheetKeyListCols renders the matched columns' key names as wrapped lines,
 // highlighting the entry at position fieldCursor (an index INTO cols). Each
-// rendered line is padded to keyW cells; the cursor marker prefixes the first
-// line of the cursor entry.
+// rendered line is padded to keyW cells; the cursor row uses th.RowSelected.
 func sheetKeyListCols(f *data.Frame, cols []int, keyW, fieldCursor int, th *theme.Theme) []string {
-	const markW = 2
-	avail := keyW - markW
-	if avail < 1 {
-		avail = 1
-	}
 	var lines []string
 	for pos, c := range cols {
 		name := sheetSanitize(f.Columns[c].Name)
 		if name == "" {
 			name = " "
 		}
-		wrapped := strings.Split(ansi.Wrap(name, avail, ""), "\n")
+		wrapped := strings.Split(ansi.Wrap(name, keyW, ""), "\n")
 		cursor := pos == fieldCursor
 		keyStyle := th.Header
 		if cursor {
 			keyStyle = th.RowSelected
 		}
-		for i, wl := range wrapped {
-			mark := "  "
-			if cursor && i == 0 {
-				mark = sheetCursorMark + " "
-			}
-			cell := keyStyle.Render(padLine(mark+wl, keyW))
+		for _, wl := range wrapped {
+			cell := keyStyle.Render(padLine(wl, keyW))
 			lines = append(lines, cell)
 		}
 	}
@@ -253,29 +233,19 @@ func sheetEditLineOf(editRunes []rune, editCur, valW int) (lineIdx, lineStart in
 	return line, start
 }
 
-// renderSheet draws the master-detail sheet into a width x height area: a
-// subtle "row N of M" header line, a "Key | Value" column header, then the
-// body. The LEFT column lists every field's key (wrapped, cursor
-// highlighted). The RIGHT column shows ONLY the cursored field's value
-// (wrapped, scrollable via valOff). When editing is true the right column
-// shows the edit runes with a block cursor instead of the static value.
+// renderSheet draws the master-detail sheet into a width x height area.
+//
+// Default (non-cursor) rows show a compact "key: value" line across the
+// full width. The cursor row expands into a left key pane (keyW) + separator +
+// right value pane (valW) with full-value scrolling support. When editing is
+// true the right pane shows the edit runes with a block cursor.
 //
 // off is the left-list scroll offset (Pane.SheetOff); valOff is the right
-// value scroll offset (Pane.SheetValOff). renderSheet clamps both
-// defensively; the edge-follow mutation stays in the caller.
+// value scroll offset (Pane.SheetValOff). Both are clamped defensively.
 //
-// filter is the current field-filter pattern; filtering reports whether the
-// filter input is active (a cursor is shown on the filter line). The left
-// list narrows to the matched columns (sheetMatchedCols) and fieldCursor is
-// interpreted as an index INTO the matched set, not a raw column. When the
-// matched set is empty the body shows a subtle "no matching fields" line.
-//
-// fieldType is the cursored field's data-type token (e.g. "int",
-// "varchar(255)", "i64"). When non-empty it is appended as a " (type)" suffix
-// to the FIRST value line, sharing the value's styling. The tag is suppressed
-// while editing so the block cursor stays clean. Empty means no tag (e.g. a
-// column with no resolvable type).
-func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editing bool, editRunes []rune, editCur, valOff int, filter string, filtering bool, fieldType string, th *theme.Theme) string {
+// filter narrows the left list to fuzzy-matched columns; fieldCursor is an
+// index INTO the matched set.
+func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editing bool, editRunes []rune, editCur, valOff int, filter string, filtering bool, th *theme.Theme) string {
 	if f == nil || f.NumRows() == 0 || width <= 0 || height <= 0 {
 		return blankLines(max(1, width), max(1, height), th)
 	}
@@ -287,8 +257,6 @@ func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editin
 	keyW, valW := sheetTableGeometry(f, inner)
 
 	matched := sheetMatchedCols(f, filter)
-	// fieldCursor is an index into matched; resolve the real column for the
-	// right pane. Empty matched set -> no field.
 	actualCol := -1
 	if len(matched) > 0 {
 		fieldCursor = clamp(fieldCursor, 0, len(matched)-1)
@@ -297,7 +265,7 @@ func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editin
 		fieldCursor = 0
 	}
 
-	// Header lines: row N of M, an optional filter line, then Key|Value.
+	// Header: row N of M
 	head := fmt.Sprintf("row %d of %d", row+1, f.NumRows())
 	out := []string{th.Subtle.Render(padLine(head, inner))}
 
@@ -306,6 +274,7 @@ func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editin
 		out = append(out, sheetFilterLine(filter, filtering, inner, th))
 	}
 
+	// Column header line
 	sep := th.Border.Render(sheetSepChar)
 	colHeader := th.Header.Render(padLine("Key", keyW)) + sep + th.Header.Render(padLine("Value", valW))
 	if w := ansi.StringWidth(colHeader); w < inner {
@@ -313,7 +282,7 @@ func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editin
 	}
 	out = append(out, colHeader)
 
-	visible := height - len(out) // remaining body lines
+	visible := height - len(out) - 1
 	if visible < 1 {
 		visible = 1
 	}
@@ -326,50 +295,109 @@ func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editin
 		return strings.Join(out, "\n")
 	}
 
-	// --- left list: keys (matched only) --------------------------------------
-	keyLines := sheetKeyListCols(f, matched, keyW, fieldCursor, th)
-	maxOff := max(0, len(keyLines)-visible)
+	// Build all body lines: compact rows + expanded cursor row.
+	// Each matched entry contributes N lines (key wrap height for compact rows;
+	// max(keyHeight, valHeight) for the cursor row).
+	type bodyLine struct {
+		text string
+	}
+	var body []bodyLine
+
+	for pos, c := range matched {
+		cursor := pos == fieldCursor
+		colName := sheetSanitize(f.Columns[c].Name)
+		if colName == "" {
+			colName = " "
+		}
+
+		if cursor {
+			// Expanded cursor row: keyW + sep + full-width value (scrollable).
+			// We emit one logical "slot" per entry in the key-list, mirroring
+			// sheetKeyListCols so that SheetOff tracks correctly.
+			keyNameLines := strings.Split(ansi.Wrap(colName, keyW, ""), "\n")
+
+			var valueText string
+			if editing {
+				valueText = sheetEditText(editRunes)
+			} else {
+				valueText = sheetSanitize(f.CellString(row, actualCol))
+				if valueText == "" {
+					valueText = " "
+				}
+			}
+			valWrapped := strings.Split(ansi.Wrap(valueText, valW, ""), "\n")
+			maxValOff := max(0, len(valWrapped)-visible)
+			valOff = clamp(valOff, 0, maxValOff)
+
+			entryHeight := len(keyNameLines)
+			for li := 0; li < entryHeight; li++ {
+				var kl string
+				if li < len(keyNameLines) {
+					kl = keyNameLines[li]
+				}
+				left := th.RowSelected.Render(padLine(kl, keyW))
+
+				var right string
+				if idx := valOff + li; idx < len(valWrapped) {
+					right = sheetRenderValueLine(valWrapped[idx], valW, editing, editRunes, editCur, valOff, idx, th)
+				} else {
+					if editing {
+						right = th.Input.Render(strings.Repeat(" ", valW))
+					} else {
+						right = th.Text.Render(strings.Repeat(" ", valW))
+					}
+				}
+				line := left + sep + right
+				if w := ansi.StringWidth(line); w < inner {
+					line += th.Text.Render(strings.Repeat(" ", inner-w))
+				}
+				body = append(body, bodyLine{line})
+			}
+		} else {
+			// Compact rows: each entry spans the same number of lines as its key
+			// would wrap to, matching edgeFollowSheet's geometry. The first line
+			// shows "key: truncated_value"; continuation lines show the
+			// wrapped key fragment followed by blanks.
+			keyNameLines := strings.Split(ansi.Wrap(colName, keyW, ""), "\n")
+			val := sheetSanitize(f.CellString(row, c))
+			valAvail := inner - keyW - 2
+			if valAvail < 1 {
+				valAvail = 1
+			}
+			dispVal := val
+			if ansi.StringWidth(dispVal) > valAvail {
+				dispVal = ansi.Truncate(dispVal, valAvail, "")
+			}
+			for li, kl := range keyNameLines {
+				keyPart := th.Header.Render(padLine(kl, keyW))
+				var valPart string
+				if li == 0 {
+					valPart = th.Text.Render(": " + dispVal)
+				} else {
+					valPart = th.Text.Render(strings.Repeat(" ", inner-keyW))
+				}
+				line := keyPart + valPart
+				if w := ansi.StringWidth(line); w < inner {
+					line += th.Text.Render(strings.Repeat(" ", inner-w))
+				}
+				body = append(body, bodyLine{line})
+			}
+		}
+	}
+
+	// Scroll offset
+	maxOff := max(0, len(body)-visible)
 	off = clamp(off, 0, maxOff)
 
-	// --- right pane: the cursored field value, with an inline type tag -------
-	var valueText string
-	if editing {
-		valueText = sheetEditText(editRunes)
-	} else {
-		valueText = sheetSanitize(f.CellString(row, actualCol))
-		if valueText == "" {
-			valueText = " "
-		}
-	}
-	valWrapped := ansi.Wrap(valueText, valW, "")
-	valLines := strings.Split(valWrapped, "\n")
-	if fieldType != "" && !editing && len(valLines) > 0 {
-		valLines[0] = valLines[0] + " (" + fieldType + ")"
-	}
-	maxValOff := max(0, len(valLines)-visible)
-	valOff = clamp(valOff, 0, maxValOff)
-
 	for i := 0; i < visible; i++ {
-		var left string
-		if idx := off + i; idx < len(keyLines) {
-			left = keyLines[idx]
+		if idx := off + i; idx < len(body) {
+			out = append(out, body[idx].text)
 		} else {
-			left = th.Text.Render(strings.Repeat(" ", keyW))
+			out = append(out, th.Text.Render(strings.Repeat(" ", inner)))
 		}
-
-		var right string
-		if idx := valOff + i; idx < len(valLines) {
-			right = sheetRenderValueLine(valLines[idx], valW, editing, editRunes, editCur, valOff, idx, th)
-		} else {
-			right = th.Text.Render(strings.Repeat(" ", valW))
-		}
-
-		line := left + sep + right
-		if w := ansi.StringWidth(line); w < inner {
-			line += th.Text.Render(strings.Repeat(" ", inner-w))
-		}
-		out = append(out, line)
 	}
+	hint := padLine("j/k move  e edit  / filter  q back", inner)
+	out = append(out, th.Subtle.Render(hint))
 	return strings.Join(out, "\n")
 }
 
@@ -396,33 +424,23 @@ func sheetFilterLine(filter string, filtering bool, inner int, th *theme.Theme) 
 }
 
 // sheetKeyList renders every field's key name as one or more wrapped lines,
-// highlighting the cursor entry. Each rendered line is padded to keyW cells.
-// The cursor marker prefixes the first line of the cursor entry; continuation
-// lines of that entry (and all lines of other entries) use a two-space indent.
+// highlighting the cursor entry with th.RowSelected. Each rendered line is
+// padded to keyW cells.
 func sheetKeyList(f *data.Frame, keyW, fieldCursor int, th *theme.Theme) []string {
-	const markW = 2
-	avail := keyW - markW
-	if avail < 1 {
-		avail = 1
-	}
 	var lines []string
 	for c := range f.Columns {
 		name := sheetSanitize(f.Columns[c].Name)
 		if name == "" {
 			name = " "
 		}
-		wrapped := strings.Split(ansi.Wrap(name, avail, ""), "\n")
+		wrapped := strings.Split(ansi.Wrap(name, keyW, ""), "\n")
 		cursor := c == fieldCursor
 		keyStyle := th.Header
 		if cursor {
 			keyStyle = th.RowSelected
 		}
-		for i, wl := range wrapped {
-			mark := "  "
-			if cursor && i == 0 {
-				mark = sheetCursorMark + " "
-			}
-			cell := keyStyle.Render(padLine(mark+wl, keyW))
+		for _, wl := range wrapped {
+			cell := keyStyle.Render(padLine(wl, keyW))
 			lines = append(lines, cell)
 		}
 	}
@@ -463,6 +481,148 @@ func sheetRenderValueLine(line string, valW int, editing bool, editRunes []rune,
 		rendered += th.Input.Render(strings.Repeat(" ", pad))
 	}
 	return rendered
+}
+
+// drawerLeftWidth returns the width of the left (key list) pane when the
+// sheet is in drawer-edit mode. The left pane takes 2/5 of the total width,
+// with a minimum of 10 columns.
+func drawerLeftWidth(totalW int) int {
+	w := totalW * 2 / 5
+	if w < 10 {
+		return 10
+	}
+	return w
+}
+
+// renderSheetDrawer renders the right-side editing drawer for the active sheet field.
+// It shows the field name and type as a header, then the full value content area (scrollable, editable).
+func renderSheetDrawer(f *data.Frame, row, col int, editRunes []rune, editCur, valOff, width, height int, fieldType string, th *theme.Theme) string {
+	if width <= 0 || height <= 0 {
+		return blankLines(max(1, width), max(1, height), th)
+	}
+	if f == nil || row < 0 || row >= f.NumRows() || col < 0 || col >= f.NumCols() {
+		return blankLines(width, height, th)
+	}
+
+	colName := sheetSanitize(f.Columns[col].Name)
+	header := colName
+	if fieldType != "" {
+		header = colName + "(" + fieldType + ")"
+	}
+
+	var lines []string
+	lines = append(lines, th.Header.Render(padLine(header, width)))
+	lines = append(lines, th.Border.Render(strings.Repeat("─", width)))
+
+	contentH := height - len(lines) - 1
+	if contentH < 1 {
+		contentH = 1
+	}
+
+	var valueText string
+	if len(editRunes) > 0 {
+		valueText = sheetEditText(editRunes)
+	} else {
+		valueText = sheetSanitize(f.CellString(row, col))
+		if valueText == "" {
+			valueText = " "
+		}
+	}
+
+	valWrapped := strings.Split(ansi.Wrap(valueText, width, ""), "\n")
+	maxValOff := max(0, len(valWrapped)-contentH)
+	valOff = clamp(valOff, 0, maxValOff)
+
+	for i := 0; i < contentH; i++ {
+		idx := valOff + i
+		if idx < len(valWrapped) {
+			line := sheetRenderValueLine(valWrapped[idx], width, true, editRunes, editCur, valOff, idx, th)
+			lines = append(lines, line)
+		} else {
+			lines = append(lines, th.Input.Render(strings.Repeat(" ", width)))
+		}
+	}
+
+	hint := padLine("ctrl+s save  esc cancel", width)
+	lines = append(lines, th.Subtle.Render(hint))
+	return strings.Join(lines, "\n")
+}
+
+// joinDrawerSplit joins a left sheet content and right drawer content with a vertical separator.
+// leftContent and rightContent are already rendered to leftW and rightW cells wide respectively.
+func joinDrawerSplit(leftContent, rightContent string, leftW, rightW, h int, th *theme.Theme) string {
+	leftLines := strings.Split(leftContent, "\n")
+	rightLines := strings.Split(rightContent, "\n")
+
+	sep := th.Border.Render("│")
+
+	blank := func(w int) string { return strings.Repeat(" ", w) }
+
+	var result []string
+	for i := 0; i < h; i++ {
+		ll := blank(leftW)
+		if i < len(leftLines) {
+			ll = leftLines[i]
+		}
+		rl := blank(rightW)
+		if i < len(rightLines) {
+			rl = rightLines[i]
+		}
+		result = append(result, ll+sep+rl)
+	}
+	return strings.Join(result, "\n")
+}
+
+// renderSheetKeyPanel renders the left key-only panel at exactly keyW width when
+// the sheet is in drawer-edit mode. Unlike renderSheet, it does NOT call
+// sheetTableGeometry internally — the caller pre-computes keyW so the panel
+// matches the pre-edit key column exactly.
+func renderSheetKeyPanel(f *data.Frame, row, off, keyW, height, fieldCursor int, filter string, filtering bool, th *theme.Theme) string {
+	if f == nil || f.NumRows() == 0 || keyW <= 0 || height <= 0 {
+		return blankLines(max(1, keyW), max(1, height), th)
+	}
+	row = clamp(row, 0, f.NumRows()-1)
+
+	matched := sheetMatchedCols(f, filter)
+	if len(matched) > 0 {
+		fieldCursor = clamp(fieldCursor, 0, len(matched)-1)
+	}
+
+	head := fmt.Sprintf("row %d of %d", row+1, f.NumRows())
+	out := []string{th.Subtle.Render(padLine(head, keyW))}
+
+	if filtering || strings.TrimSpace(filter) != "" {
+		out = append(out, sheetFilterLine(filter, filtering, keyW, th))
+	}
+
+	out = append(out, th.Header.Render(padLine("Key", keyW)))
+
+	visible := height - len(out) - 1
+	if visible < 1 {
+		visible = 1
+	}
+
+	var body []string
+	if len(matched) == 0 {
+		body = append(body, th.Placeholder.Render(padLine("no match", keyW)))
+	} else {
+		body = sheetKeyListCols(f, matched, keyW, fieldCursor, th)
+	}
+
+	maxOff := max(0, len(body)-visible)
+	off = clamp(off, 0, maxOff)
+
+	for i := 0; i < visible; i++ {
+		if idx := off + i; idx < len(body) {
+			out = append(out, body[idx])
+		} else {
+			out = append(out, th.Text.Render(strings.Repeat(" ", keyW)))
+		}
+	}
+
+	hint := padLine("e edit  / filter  j/k nav", keyW)
+	out = append(out, th.Subtle.Render(hint))
+	return strings.Join(out, "\n")
 }
 
 // rowClipboardText renders one row as tab-separated values for copying.

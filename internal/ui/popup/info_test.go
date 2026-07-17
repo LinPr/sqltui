@@ -66,6 +66,9 @@ func (b *infoTestBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, errors.New("not implemented")
 }
 func (b *infoTestBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
+func (b *infoTestBackend) ColumnIndexTypes(string, string) (map[string]string, error) {
+	return nil, nil
+}
 func (b *infoTestBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) {
 	return b.meta, b.err
 }
@@ -285,8 +288,8 @@ func TestInfoDBModeLoadsMeta(t *testing.T) {
 		t.Fatalf("list len after meta = %d, want 2", len(o.list))
 	}
 	want := []infoColRow{
-		{Name: "id", Type: "int", NotNull: "NO", Default: "", Comment: ""},
-		{Name: "email", Type: "varchar(255)", NotNull: "YES", Default: "", Comment: "primary contact"},
+		{Name: "id", Type: "int", NotNull: "NO", Default: ""},
+		{Name: "email", Type: "varchar(255)", NotNull: "YES", Default: ""},
 	}
 	for i, w := range want {
 		if o.list[i] != w {
@@ -301,7 +304,7 @@ func TestInfoDBModeLoadsMeta(t *testing.T) {
 			t.Errorf("db-mode view should not contain frame DType %q", gone)
 		}
 	}
-	for _, want := range []string{"int", "varchar(255)", "primary contact", "NO", "YES"} {
+	for _, want := range []string{"int", "varchar(255)", "√", "✗"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("db-mode view missing %q", want)
 		}

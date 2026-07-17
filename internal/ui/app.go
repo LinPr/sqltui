@@ -352,9 +352,22 @@ func (a *App) renderBody(w, h int) string {
 	}
 
 	if p.Mode == ModeSheet && frame != nil && frame.NumRows() > 0 {
+		if p.SheetEditing {
+			keyW, valW := sheetTableGeometry(frame, w)
+			matched := sheetMatchedCols(frame, string(p.SheetFilter))
+			actualCol := p.SheetField
+			if len(matched) > 0 {
+				actualCol = matched[clamp(p.SheetField, 0, len(matched)-1)]
+			}
+			leftContent := renderSheetKeyPanel(frame, p.Table.Sel(), p.SheetOff, keyW, h, p.SheetField,
+				string(p.SheetFilter), p.SheetFiltering, a.th)
+			rightContent := renderSheetDrawer(frame, p.Table.Sel(), actualCol,
+				p.SheetEdit, p.SheetEditCur, p.SheetValOff, valW, h, a.cursorFieldType(), a.th)
+			return joinDrawerSplit(leftContent, rightContent, keyW, valW, h, a.th)
+		}
 		return renderSheet(frame, p.Table.Sel(), p.SheetOff, w, h, p.SheetField,
-			p.SheetEditing, p.SheetEdit, p.SheetEditCur, p.SheetValOff,
-			string(p.SheetFilter), p.SheetFiltering, a.cursorFieldType(), a.th)
+			false, nil, 0, p.SheetValOff,
+			string(p.SheetFilter), p.SheetFiltering, a.th)
 	}
 
 	return p.Table.Render(frame, RenderOpts{
@@ -635,7 +648,8 @@ func (a *App) handleSheetEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	// Re-clamp the right-pane value scroll to the edit buffer length.
 	_, valW := sheetTableGeometry(f, a.width)
-	visible := max(1, max(1, a.height-1)-2)
+	// drawer header: fieldname(type) + separator + hint = 3 lines
+	visible := max(1, max(1, a.height-1)-3)
 	count := sheetValueLineCount(f, p.Table.Sel(), p.SheetField, valW)
 	if editing := len(p.SheetEdit); editing > 0 {
 		count = strings.Count(ansi.Wrap(string(p.SheetEdit), valW, ""), "\n") + 1

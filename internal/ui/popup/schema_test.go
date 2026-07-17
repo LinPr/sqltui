@@ -43,9 +43,10 @@ func (b *schemaTestBackend) Tables(ns string) ([]string, error) {
 func (b *schemaTestBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, errors.New("not implemented")
 }
-func (b *schemaTestBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
-func (b *schemaTestBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
-func (b *schemaTestBackend) Close() error                                  { return nil }
+func (b *schemaTestBackend) PrimaryKeys(string, string) ([]string, error)                { return nil, nil }
+func (b *schemaTestBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)         { return nil, nil }
+func (b *schemaTestBackend) ColumnIndexTypes(string, string) (map[string]string, error)  { return nil, nil }
+func (b *schemaTestBackend) Close() error                                                { return nil }
 
 // schemaTestBackendNS additionally reports a connected namespace through the
 // optional CurrentNamespace interface.
